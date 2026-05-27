@@ -1,0 +1,262 @@
+import { parsePartialJson } from "@langchain/core/output_parsers";
+import { useStreamContext } from "@/providers/Stream";
+import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
+import { getContentString } from "../utils";
+import { BranchSwitcher, CommandBar } from "./shared";
+import { MarkdownText } from "../markdown-text";
+import { LoadExternalComponent } from "@langchain/langgraph-sdk/react-ui";
+import { cn } from "@/lib/utils";
+import { ToolCalls, ToolResult } from "./tool-calls";
+import { MessageContentComplex } from "@langchain/core/messages";
+import { Fragment } from "react/jsx-runtime";
+import { isAgentInboxInterruptSchema } from "@/lib/agent-inbox-interrupt";
+import { ThreadView } from "../agent-inbox";
+import { useQueryState, parseAsBoolean } from "nuqs";
+import { GenericInterruptView } from "./generic-interrupt";
+import { useArtifact } from "../artifact";
+import { Bot } from "lucide-react";
+import { SourcesList } from "./sources";
+
+function CustomComponent({
+  message,
+  thread,
+}: {
+  message: Message;
+  thread: ReturnType<typeof useStreamContext>;
+}) {
+  const artifact = useArtifact();
+  const { values } = useStreamContext();
+  const customComponents = values.ui?.filter(
+    (ui) => ui.metadata?.message_id === message.id
+  );
+
+  if (!customComponents?.length) return null;
+  return (
+    <Fragment key={message.id}>
+      {customComponents.map((customComponent) => (
+        <LoadExternalComponent
+          key={customComponent.id}
+          stream={thread as any}
+          message={customComponent}
+          meta={{ ui: customComponent, artifact }}
+        />
+      ))}
+    </Fragment>
+  );
+}
+
+function parseAnthropicStreamedToolCalls(
+  content: MessageContentComplex[]
+): AIMessage["tool_calls"] {
+  const toolCallContents = content.filter((c) => c.type === "tool_use" && c.id);
+
+  return toolCallContents.map((tc) => {
+    const toolCall = tc as Record<string, any>;
+    let json: Record<string, any> = {};
+    if (toolCall?.input) {
+      try {
+        json = parsePartialJson(toolCall.input) ?? {};
+      } catch {
+        // Pass
+      }
+    }
+    return {
+      name: toolCall.name ?? "",
+      id: toolCall.id ?? "",
+      args: json,
+      type: "tool_call",
+    };
+  });
+}
+
+interface InterruptProps {
+  interrupt?: unknown;
+  isLastMessage: boolean;
+  hasNoAIOrToolMessages: boolean;
+}
+
+function Interrupt({
+  interrupt,
+  isLastMessage,
+  hasNoAIOrToolMessages,
+}: InterruptProps) {
+  const fallbackValue = Array.isArray(interrupt)
+    ? (interrupt as Record<string, any>[])
+    : (((interrupt as { value?: unknown } | undefined)?.value ??
+        interrupt) as Record<string, any>);
+
+  return (
+    <>
+      {isAgentInboxInterruptSchema(interrupt) &&
+        (isLastMessage || hasNoAIOrToolMessages) && (
+          <ThreadView interrupt={interrupt} />
+        )}
+      {interrupt &&
+      !isAgentInboxInterruptSchema(interrupt) &&
+      (isLastMessage || hasNoAIOrToolMessages) ? (
+        <GenericInterruptView interrupt={fallbackValue} />
+      ) : null}
+    </>
+  );
+}
+
+export function AssistantMessage({
+  message,
+  isLoading,
+  handleRegenerate,
+}: {
+  message: Message | undefined;
+  isLoading: boolean;
+  handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
+}) {
+  const content = message?.content ?? [];
+  const contentString = getContentString(content);
+  const [hideToolCalls] = useQueryState(
+    "hideToolCalls",
+    parseAsBoolean.withDefault(false)
+  );
+
+  const thread = useStreamContext();
+  const isLastMessage =
+    thread.messages[thread.messages.length - 1].id === message?.id;
+  const hasNoAIOrToolMessages = !thread.messages.find(
+    (m) => m.type === "ai" || m.type === "tool"
+  );
+  const meta = message ? thread.getMessagesMetadata(message) : undefined;
+  const threadInterrupt = thread.interrupt;
+
+  const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
+  const anthropicStreamedToolCalls = Array.isArray(content)
+    ? parseAnthropicStreamedToolCalls(content)
+    : undefined;
+
+  const hasToolCalls =
+    message &&
+    "tool_calls" in message &&
+    message.tool_calls &&
+    message.tool_calls.length > 0;
+  const toolCallsHaveContents =
+    hasToolCalls &&
+    message.tool_calls?.some(
+      (tc) => tc.args && Object.keys(tc.args).length > 0
+    );
+  const hasAnthropicToolCalls = !!anthropicStreamedToolCalls?.length;
+  const isToolResult = message?.type === "tool";
+
+  const sources = message?.id ? thread.sourcesMap?.[message.id] : undefined;
+
+  if (isToolResult && hideToolCalls) {
+    return null;
+  }
+
+  return (
+    <div className="message-animate group flex w-full items-start gap-3">
+      {/* Avatar */}
+      {!isToolResult && (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Bot className="h-4 w-4" />
+        </div>
+      )}
+
+      <div className={cn("flex min-w-0 flex-1 flex-col gap-3", isToolResult && "ml-11")}>
+        {isToolResult ? (
+          <>
+            <ToolResult message={message} />
+            <Interrupt
+              interrupt={threadInterrupt}
+              isLastMessage={isLastMessage}
+              hasNoAIOrToolMessages={hasNoAIOrToolMessages}
+            />
+          </>
+        ) : (
+          <>
+            {contentString.length > 0 && (
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <MarkdownText>{contentString}</MarkdownText>
+              </div>
+            )}
+
+            {!hideToolCalls && (
+              <>
+                {(hasToolCalls && toolCallsHaveContents && (
+                  <ToolCalls toolCalls={message.tool_calls} />
+                )) ||
+                  (hasAnthropicToolCalls && (
+                    <ToolCalls toolCalls={anthropicStreamedToolCalls} />
+                  )) ||
+                  (hasToolCalls && (
+                    <ToolCalls toolCalls={message.tool_calls} />
+                  ))}
+              </>
+            )}
+
+            {sources && sources.length > 0 && (
+              <SourcesList sources={sources} />
+            )}
+
+            {message && <CustomComponent message={message} thread={thread} />}
+
+            <Interrupt
+              interrupt={threadInterrupt}
+              isLastMessage={isLastMessage}
+              hasNoAIOrToolMessages={hasNoAIOrToolMessages}
+            />
+
+            <div
+              className={cn(
+                "flex items-center gap-2 transition-opacity",
+                "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+              )}
+            >
+              <BranchSwitcher
+                branch={meta?.branch}
+                branchOptions={meta?.branchOptions}
+                onSelect={(branch) => thread.setBranch(branch)}
+                isLoading={isLoading}
+              />
+              <CommandBar
+                content={contentString}
+                isLoading={isLoading}
+                isAiMessage={true}
+                handleRegenerate={() => handleRegenerate(parentCheckpoint)}
+              />
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function AssistantMessageLoading({ thinkingStep }: { thinkingStep?: string }) {
+  return (
+    <div className="message-animate flex items-start gap-3">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <Bot className="h-4 w-4" />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-1.5 rounded-2xl bg-muted px-4 py-3">
+          <div className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:-0.3s]" />
+          <div className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:-0.15s]" />
+          <div className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/40" />
+        </div>
+        {thinkingStep && (
+          <p className="ml-1 text-xs italic text-muted-foreground">{thinkingStep}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function ThinkingIndicator() {
+  return (
+    <div className="message-animate ml-11 flex items-center gap-2 text-muted-foreground">
+      <div className="flex items-center gap-1">
+        <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary/60" />
+        <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary/60 [animation-delay:0.2s]" />
+        <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary/60 [animation-delay:0.4s]" />
+      </div>
+      <span className="text-sm italic">Thinking...</span>
+    </div>
+  );
+}
