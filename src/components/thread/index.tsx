@@ -1,9 +1,10 @@
 import { v4 as uuidv4 } from "uuid";
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { Fragment, ReactNode, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
 import { FormEvent } from "react";
+import { getContentString, extractFollowUps } from "./utils";
 import { Button } from "../ui/button";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { AssistantMessage, AssistantMessageLoading, ThinkingIndicator } from "./messages/ai";
@@ -23,7 +24,9 @@ import {
   XIcon,
   Send,
   LogOut,
+  Settings,
 } from "lucide-react";
+import { SettingsPanel } from "./settings-panel";
 
 const ssoEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH !== "true";
 import { useQueryState, parseAsBoolean } from "nuqs";
@@ -108,7 +111,9 @@ export function Thread() {
   );
 
   const [input, setInput] = useState("");
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [starterPrompts, setStarterPrompts] = useState<StarterPrompt[]>([]);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
 
@@ -230,28 +235,12 @@ export function Thread() {
     );
   };
 
-  const handleFollowUp = (question: string) => {
+  // Put a follow-up suggestion into the input box (editable) instead of
+  // auto-submitting; the user presses Send/Enter to run it.
+  const fillFollowUp = (question: string) => {
     if (isLoading) return;
-    setFirstTokenReceived(false);
-    const newHumanMessage: Message = {
-      id: uuidv4(),
-      type: "human",
-      content: [{ type: "text", text: question }] as Message["content"],
-    };
-    const toolMessages = ensureToolCallsHaveResponses(stream.messages);
-    stream.submit(
-      { messages: [...toolMessages, newHumanMessage] },
-      {
-        optimisticValues: (prev) => ({
-          ...prev,
-          messages: [
-            ...(prev.messages ?? []),
-            ...toolMessages,
-            newHumanMessage,
-          ],
-        }),
-      }
-    );
+    setInput(question);
+    requestAnimationFrame(() => chatInputRef.current?.focus());
   };
 
   const handleRegenerate = (
@@ -272,13 +261,6 @@ export function Thread() {
   const hasNoAIOrToolMessages = !messages.find(
     (m) => m.type === "ai" || m.type === "tool"
   );
-
-  // Show follow-up chips after the last AI message when not loading
-  const lastAiMessageId = !isLoading
-    ? [...messages].reverse().find((m) => m.type === "ai")?.id
-    : undefined;
-  const showFollowUps =
-    !!lastAiMessageId && stream.followUpQuestions.length > 0 && !isLoading;
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
@@ -452,12 +434,45 @@ export function Thread() {
                             isLoading={isLoading}
                           />
                         ) : (
-                          <AssistantMessage
+                          <Fragment
                             key={message.id || `${message.type}-${index}`}
-                            message={message}
-                            isLoading={isLoading}
-                            handleRegenerate={handleRegenerate}
-                          />
+                          >
+                            <AssistantMessage
+                              message={message}
+                              isLoading={isLoading}
+                              handleRegenerate={handleRegenerate}
+                            />
+                            {(() => {
+                              // Per-message follow-up chips, parsed from this
+                              // answer's own content (works live and on reload).
+                              const isStreamingLast =
+                                isLoading && index === messages.length - 1;
+                              const followUps = isStreamingLast
+                                ? []
+                                : extractFollowUps(
+                                    getContentString(message.content)
+                                  );
+                              if (!followUps.length) return null;
+                              return (
+                                <div className="flex flex-col gap-2 pb-2">
+                                  <p className="text-xs font-medium text-muted-foreground">
+                                    Want to explore further?
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {followUps.map((q, i) => (
+                                      <button
+                                        key={i}
+                                        onClick={() => fillFollowUp(q)}
+                                        className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-foreground transition-colors hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
+                                      >
+                                        {q}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </Fragment>
                         )
                       )}
 
@@ -484,25 +499,6 @@ export function Thread() {
                     return isAfterToolCall ? <ThinkingIndicator /> : null;
                   })()}
 
-                  {/* Follow-up question chips */}
-                  {showFollowUps && (
-                    <div className="flex flex-col gap-2 pb-2">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Want to explore further?
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {stream.followUpQuestions.map((q, i) => (
-                          <button
-                            key={i}
-                            onClick={() => handleFollowUp(q)}
-                            className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-foreground transition-colors hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
-                          >
-                            {q}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </>
               }
               footer={
@@ -522,6 +518,7 @@ export function Thread() {
                 <form onSubmit={handleSubmit} className="flex flex-col">
                   <div className="flex items-end gap-2 p-3">
                     <textarea
+                      ref={chatInputRef}
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
                       onKeyDown={(e) => {
@@ -596,6 +593,16 @@ export function Thread() {
                       >
                         <Bug className="h-3.5 w-3.5" />
                         Debug
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSettingsOpen(true)}
+                        className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs transition-colors"
+                        title="Open settings"
+                      >
+                        <Settings className="h-3.5 w-3.5" />
+                        Settings
                       </button>
                     </div>
                   </div>
@@ -683,6 +690,11 @@ export function Thread() {
           </div>
         </div>
       </div>
+
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
     </div>
   );
 }

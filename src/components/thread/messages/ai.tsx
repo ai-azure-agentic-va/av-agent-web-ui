@@ -1,7 +1,8 @@
 import { parsePartialJson } from "@langchain/core/output_parsers";
 import { useStreamContext } from "@/providers/Stream";
 import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
-import { getContentString } from "../utils";
+import { getContentString, stripFollowUpSection } from "../utils";
+import { CitedSources } from "./sources";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
 import { LoadExternalComponent } from "@langchain/langgraph-sdk/react-ui";
@@ -15,7 +16,7 @@ import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
 import { Bot } from "lucide-react";
-import { SourcesList } from "./sources";
+import { DebugSection } from "./debug-section";
 
 function CustomComponent({
   message,
@@ -110,7 +111,8 @@ export function AssistantMessage({
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
 }) {
   const content = message?.content ?? [];
-  const contentString = getContentString(content);
+  // Strip the "Want to explore further?" section — it renders as chips below.
+  const contentString = stripFollowUpSection(getContentString(content));
   const [hideToolCalls] = useQueryState(
     "hideToolCalls",
     parseAsBoolean.withDefault(false)
@@ -144,6 +146,7 @@ export function AssistantMessage({
   const isToolResult = message?.type === "tool";
 
   const sources = message?.id ? thread.sourcesMap?.[message.id] : undefined;
+  const debug = message?.id ? thread.debugMap?.[message.id] : undefined;
 
   if (isToolResult && hideToolCalls) {
     return null;
@@ -191,8 +194,10 @@ export function AssistantMessage({
             )}
 
             {sources && sources.length > 0 && (
-              <SourcesList sources={sources} />
+              <CitedSources sources={sources} />
             )}
+
+            {debug && <DebugSection debug={debug} />}
 
             {message && <CustomComponent message={message} thread={thread} />}
 

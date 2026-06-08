@@ -13,6 +13,7 @@ import { useQueryState } from "nuqs";
 import { v4 as uuidv4 } from "uuid";
 import { getContentString } from "@/components/thread/utils";
 import { useThreads } from "@/providers/Thread";
+import { settingsRequestFields } from "@/lib/settings";
 
 export type StateType = { messages: Message[]; ui?: any[] };
 
@@ -28,6 +29,55 @@ export type Source = {
   reranker_score?: number;
   preview?: string;
   updated_at?: string;
+};
+
+// Mirrors the backend `done.debug` block (api/main.py `_build_debug_payload`):
+// search/chunks/prompt/settings. Rendered as collapsible rows under sources.
+export type DebugSearch = {
+  original_query?: string;
+  rewritten_query?: string;
+  tool_query?: string | null;
+  index?: string;
+  endpoint?: string;
+  search_endpoint?: string;
+  embedding_model?: string;
+  semantic_config?: string;
+  top_k_requested?: number;
+  top_k_used?: number;
+  hybrid?: {
+    mode?: string;
+    use_hybrid?: boolean;
+    use_semantic?: boolean;
+    use_vector?: boolean;
+  };
+};
+
+export type DebugChunk = {
+  chunk_number?: number;
+  content?: string | null;
+  score?: number | null;
+  title?: string | null;
+  source_url?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type DebugPromptMessage = {
+  role?: string;
+  content?: string;
+};
+
+export type DebugPrompt = {
+  system?: string | null;
+  user?: string;
+  grounding?: string | null;
+  messages?: DebugPromptMessage[];
+};
+
+export type DebugPayload = {
+  search?: DebugSearch;
+  chunks?: DebugChunk[];
+  prompt?: DebugPrompt;
+  settings?: Record<string, unknown>;
 };
 
 type StreamSubmitInput = {
@@ -62,6 +112,7 @@ type ParentAgentStreamContext = {
     branchOptions: undefined;
   };
   sourcesMap: Record<string, Source[]>;
+  debugMap: Record<string, DebugPayload>;
   followUpQuestions: string[];
   thinkingStep: string;
   lastDonePayload: unknown;
@@ -135,6 +186,7 @@ function answerFromDonePayload(payload: unknown): {
   answer: string;
   sources?: Source[];
   followUpQuestions?: string[];
+  debug?: DebugPayload;
 } {
   if (payload && typeof payload === "object") {
     const body = payload as Record<string, unknown>;
@@ -150,6 +202,10 @@ function answerFromDonePayload(payload: unknown): {
             (q): q is string => typeof q === "string",
           )
         : undefined,
+      debug:
+        body.debug && typeof body.debug === "object"
+          ? (body.debug as DebugPayload)
+          : undefined,
     };
   }
   return { answer: "" };
@@ -166,6 +222,7 @@ async function readParentAgentStream(
   answer: string;
   sources?: Source[];
   followUpQuestions?: string[];
+  debug?: DebugPayload;
   rawPayload?: unknown;
 }> {
   if (!response.body) {
@@ -245,6 +302,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | undefined>();
   const [sourcesMap, setSourcesMap] = useState<Record<string, Source[]>>({});
+  const [debugMap, setDebugMap] = useState<Record<string, DebugPayload>>({});
   const [followUpQuestions, setFollowUpQuestions] = useState<string[]>([]);
   const [thinkingStep, setThinkingStep] = useState<string>("");
   const [lastDonePayload, setLastDonePayload] = useState<unknown>(null);
@@ -368,6 +426,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
             message: messageText,
             session_id: sessionId,
             metadata: { source: "agent-web-ui" },
+            ...settingsRequestFields(),
           }),
           signal: controller.signal,
         });
@@ -438,6 +497,12 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
             [streamingMessageId]: result.sources!,
           }));
         }
+        if (result.debug) {
+          setDebugMap((prev) => ({
+            ...prev,
+            [streamingMessageId]: result.debug!,
+          }));
+        }
         if (result.followUpQuestions?.length) {
           setFollowUpQuestions(result.followUpQuestions);
         }
@@ -485,11 +550,13 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       setBranch: () => undefined,
       getMessagesMetadata,
       sourcesMap,
+      debugMap,
       followUpQuestions,
       thinkingStep,
       lastDonePayload,
     }),
     [
+      debugMap,
       error,
       followUpQuestions,
       getMessagesMetadata,
