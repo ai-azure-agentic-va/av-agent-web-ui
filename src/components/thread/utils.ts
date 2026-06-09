@@ -46,6 +46,29 @@ export function extractFollowUps(content: string): string[] {
   return out;
 }
 
+/**
+ * Turn inline `[n]` citation markers in the answer into clickable links to the
+ * corresponding source URL, so a user can click the citation in the text. Markers
+ * with no matching source (or no URL) are left as plain text.
+ */
+export function linkifyCitations(
+  content: string,
+  sources?: { index?: number; url?: string }[],
+): string {
+  if (!content || !sources || sources.length === 0) return content;
+  const urlByIndex = new Map<number, string>();
+  sources.forEach((s, i) => {
+    const idx = s.index ?? i + 1;
+    if (s.url) urlByIndex.set(idx, s.url);
+  });
+  if (urlByIndex.size === 0) return content;
+  return content.replace(/\[(\d{1,2})\]/g, (match, num) => {
+    const url = urlByIndex.get(Number(num));
+    // Escaped inner brackets so the link text renders as literal "[n]".
+    return url ? `[\\[${num}\\]](${url})` : match;
+  });
+}
+
 /** Remove the "Want to explore further?" section so it can render as chips instead. */
 export function stripFollowUpSection(content: string): string {
   if (!content) return content;

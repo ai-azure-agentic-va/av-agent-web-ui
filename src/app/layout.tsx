@@ -7,8 +7,8 @@ import { ThemeProvider } from "next-themes";
 import { AuthSessionProvider } from "@/components/auth/session-provider";
 
 export const metadata: Metadata = {
-  title: "Enterprise Technology Services",
-  description: "Enterprise Technology Services",
+  title: "ETS Virtual Assistant",
+  description: "ETS Virtual Assistant",
 };
 
 export default function RootLayout({

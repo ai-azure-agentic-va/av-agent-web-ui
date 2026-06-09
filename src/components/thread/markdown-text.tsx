@@ -120,6 +120,8 @@ const defaultComponents: any = {
   ),
   a: ({ className, ...props }: { className?: string }) => (
     <a
+      target="_blank"
+      rel="noopener noreferrer"
       className={cn(
         "text-primary font-medium underline underline-offset-4",
         className,

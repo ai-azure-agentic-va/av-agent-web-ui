@@ -355,7 +355,7 @@ export function Thread() {
               >
                 <ETSLogo width={28} height={28} />
                 <span className="text-lg font-semibold tracking-tight text-foreground">
-                  Enterprise Technology Services
+                  ETS Virtual Assistant
                 </span>
               </button>
             </div>
@@ -394,8 +394,11 @@ export function Thread() {
                       <ETSLogo width={48} height={48} />
                       <div>
                         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-                          Enterprise Technology Services
+                          ETS Virtual Assistant
                         </h1>
+                        <p className="mt-1 text-base text-muted-foreground">
+                          How can I support you today?
+                        </p>
                       </div>
 
                       {/* Starter Prompts */}
@@ -534,7 +537,7 @@ export function Thread() {
                           form?.requestSubmit();
                         }
                       }}
-                      placeholder="Message Enterprise Technology Services..."
+                      placeholder="How can I support you today?"
                       rows={1}
                       className="field-sizing-content min-h-[44px] max-h-[200px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-0"
                     />

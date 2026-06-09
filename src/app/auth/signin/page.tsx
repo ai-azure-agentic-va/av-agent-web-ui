@@ -15,7 +15,7 @@ export default function SignInPage() {
       <div className="flex flex-col items-center gap-4 text-center">
         <ETSLogo width={48} height={48} />
         <h1 className="text-xl font-semibold text-foreground">
-          Enterprise Technology Services
+          ETS Virtual Assistant
         </h1>
         <p className="text-sm text-muted-foreground">
           Redirecting to Microsoft sign-in...

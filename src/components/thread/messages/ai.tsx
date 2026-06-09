@@ -1,7 +1,11 @@
 import { parsePartialJson } from "@langchain/core/output_parsers";
 import { useStreamContext } from "@/providers/Stream";
 import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
-import { getContentString, stripFollowUpSection } from "../utils";
+import {
+  getContentString,
+  stripFollowUpSection,
+  linkifyCitations,
+} from "../utils";
 import { CitedSources } from "./sources";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
@@ -175,7 +179,9 @@ export function AssistantMessage({
           <>
             {contentString.length > 0 && (
               <div className="prose prose-sm dark:prose-invert max-w-none">
-                <MarkdownText>{contentString}</MarkdownText>
+                <MarkdownText>
+                  {linkifyCitations(contentString, sources)}
+                </MarkdownText>
               </div>
             )}
 

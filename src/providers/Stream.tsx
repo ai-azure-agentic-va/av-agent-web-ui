@@ -211,6 +211,22 @@ function answerFromDonePayload(payload: unknown): {
   return { answer: "" };
 }
 
+// Turn raw backend/LLM errors into user-friendly text. Rate-limit (HTTP 429 /
+// Azure OpenAI "too_many_requests") is the common one — show an actionable
+// retry hint instead of the raw JSON error.
+function friendlyError(raw: string): string {
+  const lower = (raw || "").toLowerCase();
+  if (
+    lower.includes("429") ||
+    lower.includes("too_many_requests") ||
+    lower.includes("too many requests") ||
+    lower.includes("rate limit")
+  ) {
+    return "The assistant is busy right now (rate limit reached). Please wait a few seconds and try again.";
+  }
+  return raw || "The backend returned an error.";
+}
+
 async function readParentAgentStream(
   response: Response,
   callbacks?: {
@@ -276,11 +292,11 @@ async function readParentAgentStream(
           parsed.data && typeof parsed.data === "object"
             ? (parsed.data as Record<string, unknown>)
             : {};
-        throw new Error(
+        const detail =
           typeof errorBody.detail === "string"
             ? errorBody.detail
-            : "The backend returned an error.",
-        );
+            : "The backend returned an error.";
+        throw new Error(friendlyError(detail));
       }
     }
   }
@@ -440,7 +456,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
           } catch {
             // keep status-based message
           }
-          throw new Error(detail);
+          if (response.status === 429) detail = friendlyError("429");
+          throw new Error(friendlyError(detail));
         }
 
         const result = await readParentAgentStream(response, {
