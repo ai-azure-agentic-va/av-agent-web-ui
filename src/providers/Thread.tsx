@@ -56,19 +56,26 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const [threadsLoading, setThreadsLoading] = useState(false);
 
   const getThreads = useCallback(async (): Promise<ConversationThread[]> => {
-    const response = await fetch(`${apiUrl}/threads/search`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ limit: 100 }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Unable to load conversation history (${response.status}).`);
+    try {
+      const response = await fetch(`${apiUrl}/threads/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 100 }),
+      });
+      // FastAPI backend uses a different thread endpoint — silently return
+      // empty list if this LangGraph-style endpoint doesn't exist.
+      if (response.status === 404 || response.status === 405) {
+        return [];
+      }
+      if (!response.ok) {
+        console.warn(`Thread history unavailable (${response.status})`);
+        return [];
+      }
+      return response.json();
+    } catch {
+      // Network error (backend not reachable for this endpoint) — non-fatal
+      return [];
     }
-
-    return response.json();
   }, [apiUrl]);
 
   const refreshThreads = useCallback(async () => {

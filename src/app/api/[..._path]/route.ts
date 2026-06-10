@@ -18,6 +18,11 @@ const BACKEND_DEV_BEARER_TOKEN =
   process.env.BACKEND_DEV_BEARER_TOKEN ??
   "";
 
+// Group IDs injected as x-dev-groups in dev-auth-bypass mode so the backend's
+// _dev_principal() can resolve the correct tenant → search index mapping.
+const BACKEND_DEV_GROUP_IDS =
+  process.env.BACKEND_DEV_GROUP_IDS ?? "";
+
 function getCorsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
@@ -72,6 +77,14 @@ async function handleRequest(
     if (contentType) headers["Content-Type"] = contentType;
     if (accept) headers["Accept"] = accept;
     if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+
+    // In dev-auth-bypass mode, inject tenant group IDs so the backend's
+    // _dev_principal() resolves the correct search index. The header is
+    // read directly from request.headers in FastAPI — no CORS issue because
+    // this is a server-to-server call (Next.js → uvicorn), not browser → server.
+    if (process.env.DISABLE_AUTH === "true" && BACKEND_DEV_GROUP_IDS) {
+      headers["x-dev-groups"] = BACKEND_DEV_GROUP_IDS;
+    }
 
     const options: RequestInit = { method, headers };
     if (["POST", "PUT", "PATCH"].includes(method)) {

@@ -20,6 +20,8 @@ import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
 import { Bot } from "lucide-react";
+import { SourcesList } from "./sources";
+import { MessageFeedback } from "@/components/thread/feedback";
 import { DebugSection } from "./debug-section";
 
 function CustomComponent({
@@ -152,6 +154,18 @@ export function AssistantMessage({
   const sources = message?.id ? thread.sourcesMap?.[message.id] : undefined;
   const debug = message?.id ? thread.debugMap?.[message.id] : undefined;
 
+  // The run_id for feedback comes from the `done` SSE event payload,
+  // stored on lastDonePayload by Stream.tsx
+  const lastDonePayload = thread.lastDonePayload as Record<string, unknown> | null;
+  const runId =
+    isLastMessage && !isLoading && lastDonePayload
+      ? (lastDonePayload.run_id as string | null) ?? null
+      : null;
+
+  const apiUrl = (process.env.NEXT_PUBLIC_API_URL ?? "/api").replace(/\/$/, "");
+  console.log("lastDonePayload:", thread.lastDonePayload);
+  console.log("isLastMessage:", isLastMessage);
+  console.log("isLoading:", isLoading);
   if (isToolResult && hideToolCalls) {
     return null;
   }
@@ -213,6 +227,7 @@ export function AssistantMessage({
               hasNoAIOrToolMessages={hasNoAIOrToolMessages}
             />
 
+            {/* Toolbar row: thumbs up, thumbs down, copy, refresh */}
             <div
               className={cn(
                 "flex items-center gap-2 transition-opacity",
@@ -225,6 +240,8 @@ export function AssistantMessage({
                 onSelect={(branch) => thread.setBranch(branch)}
                 isLoading={isLoading}
               />
+              {/* Feedback thumbs sit left of copy/refresh */}
+              <MessageFeedback runId={runId} apiUrl={apiUrl} />
               <CommandBar
                 content={contentString}
                 isLoading={isLoading}
