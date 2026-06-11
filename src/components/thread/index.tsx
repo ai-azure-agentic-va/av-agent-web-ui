@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { Fragment, ReactNode, useEffect, useRef, useState } from "react";
+import { Fragment, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
@@ -20,15 +20,13 @@ import {
   LoaderCircle,
   PanelLeftClose,
   PanelLeft,
+  Settings,
   SquarePen,
   XIcon,
   Send,
   LogOut,
-  Settings,
 } from "lucide-react";
 import { SettingsPanel } from "./settings-panel";
-
-const ssoEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH !== "true";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import ThreadHistory from "./history";
@@ -49,6 +47,8 @@ import {
   ArtifactTitle,
   useArtifactContext,
 } from "./artifact";
+
+const ssoEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH !== "true";
 
 type StarterPrompt = { label?: string; message: string };
 
@@ -73,6 +73,18 @@ function StickyToBottomContent(props: {
   );
 }
 
+function StreamingAutoScroll({ isLoading, messages }: { isLoading: boolean; messages: Message[] }) {
+  const { scrollToBottom } = useStickToBottomContext();
+
+  useEffect(() => {
+    if (isLoading) {
+      scrollToBottom();
+    }
+  }, [isLoading, messages, scrollToBottom]);
+
+  return null;
+}
+
 function ScrollToBottom(props: { className?: string }) {
   const { isAtBottom, scrollToBottom } = useStickToBottomContext();
 
@@ -89,6 +101,131 @@ function ScrollToBottom(props: { className?: string }) {
     >
       <ArrowDown className="h-4 w-4" />
     </Button>
+  );
+}
+
+type ChatInputProps = {
+  input: string;
+  setInput: (v: string) => void;
+  handleSubmit: (e: FormEvent) => void;
+  isLoading: boolean;
+  stream: { isLoading: boolean; stop: () => void };
+  hideToolCalls: boolean | null;
+  setHideToolCalls: (v: boolean) => void;
+  debugOpen: boolean | null;
+  setDebugOpen: (v: boolean | ((p: boolean) => boolean)) => void;
+  textareaRef?: RefObject<HTMLTextAreaElement | null>;
+  placeholder?: string;
+  onSettingsClick?: () => void;
+};
+
+function ChatInput({
+  input,
+  setInput,
+  handleSubmit,
+  isLoading,
+  stream,
+  hideToolCalls,
+  setHideToolCalls,
+  debugOpen,
+  setDebugOpen,
+  textareaRef,
+  placeholder = "Message Enterprise Technology Services...",
+  onSettingsClick,
+}: ChatInputProps) {
+  return (
+    <div className="relative rounded-2xl border border-border bg-card shadow-sm">
+      <form onSubmit={handleSubmit} className="flex flex-col">
+        <div className="flex items-end gap-2 p-3">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (
+                e.key === "Enter" &&
+                !e.shiftKey &&
+                !e.metaKey &&
+                !e.nativeEvent.isComposing
+              ) {
+                e.preventDefault();
+                const el = e.target as HTMLElement | undefined;
+                const form = el?.closest("form");
+                form?.requestSubmit();
+              }
+            }}
+            placeholder={placeholder}
+            rows={1}
+            className="field-sizing-content min-h-[44px] max-h-[200px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-0"
+          />
+          <div className="flex items-center gap-1 pb-1">
+            {stream.isLoading ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-9 w-9"
+                onClick={() => stream.stop()}
+              >
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              </Button>
+            ) : (
+              <Button
+                type="submit"
+                size="icon"
+                className="h-9 w-9"
+                disabled={isLoading || !input.trim()}
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center justify-between border-t border-border px-4 py-2">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="render-tool-calls"
+                checked={hideToolCalls ?? false}
+                onCheckedChange={setHideToolCalls}
+                className="scale-90"
+              />
+              <Label
+                htmlFor="render-tool-calls"
+                className="text-xs text-muted-foreground"
+              >
+                Hide tool calls
+              </Label>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDebugOpen((p) => !p)}
+              className={cn(
+                "flex items-center gap-1 text-xs transition-colors",
+                debugOpen
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              title="Toggle debug panel"
+            >
+              <Bug className="h-3.5 w-3.5" />
+              Debug
+            </button>
+            {onSettingsClick && (
+              <button
+                type="button"
+                onClick={onSettingsClick}
+                className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                title="Open settings"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                Settings
+              </button>
+            )}
+          </div>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -377,6 +514,7 @@ export function Thread() {
 
           {/* Chat Area */}
           <StickToBottom className="relative flex-1 overflow-hidden">
+            <StreamingAutoScroll isLoading={isLoading} messages={messages} />
             <StickyToBottomContent
               className={cn(
                 "absolute inset-0 overflow-y-auto scrollbar-thin px-4",
@@ -390,7 +528,7 @@ export function Thread() {
               content={
                 <>
                   {!chatStarted && (
-                    <div className="flex flex-col items-center gap-4 text-center">
+                    <div className="flex w-full flex-col items-center gap-6 text-center">
                       <ETSLogo width={48} height={48} />
                       <div>
                         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
@@ -401,9 +539,27 @@ export function Thread() {
                         </p>
                       </div>
 
+                      {/* Search Box */}
+                      <div className="w-full max-w-2xl text-left">
+                        <ChatInput
+                          input={input}
+                          setInput={setInput}
+                          handleSubmit={handleSubmit}
+                          isLoading={isLoading}
+                          stream={stream}
+                          hideToolCalls={hideToolCalls}
+                          setHideToolCalls={setHideToolCalls}
+                          debugOpen={debugOpen}
+                          setDebugOpen={setDebugOpen}
+                          textareaRef={chatInputRef}
+                          placeholder="How can I support you today?"
+                          onSettingsClick={() => setSettingsOpen(true)}
+                        />
+                      </div>
+
                       {/* Starter Prompts */}
                       {starterPrompts.length > 0 && (
-                        <div className="mt-2 grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
                           {starterPrompts.map((prompt, i) => (
                             <button
                               key={i}
@@ -515,104 +671,26 @@ export function Thread() {
           </StickToBottom>
 
           {/* Input Area */}
-          <div className="border-t border-border bg-background px-4 py-4">
-            <div className="mx-auto max-w-3xl">
-              <div className="relative rounded-2xl border border-border bg-card shadow-sm">
-                <form onSubmit={handleSubmit} className="flex flex-col">
-                  <div className="flex items-end gap-2 p-3">
-                    <textarea
-                      ref={chatInputRef}
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (
-                          e.key === "Enter" &&
-                          !e.shiftKey &&
-                          !e.metaKey &&
-                          !e.nativeEvent.isComposing
-                        ) {
-                          e.preventDefault();
-                          const el = e.target as HTMLElement | undefined;
-                          const form = el?.closest("form");
-                          form?.requestSubmit();
-                        }
-                      }}
-                      placeholder="How can I support you today?"
-                      rows={1}
-                      className="field-sizing-content min-h-[44px] max-h-[200px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-0"
-                    />
-
-                    <div className="flex items-center gap-1 pb-1">
-                      {stream.isLoading ? (
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="h-9 w-9"
-                          onClick={() => stream.stop()}
-                        >
-                          <LoaderCircle className="h-4 w-4 animate-spin" />
-                        </Button>
-                      ) : (
-                        <Button
-                          type="submit"
-                          size="icon"
-                          className="h-9 w-9"
-                          disabled={isLoading || !input.trim()}
-                        >
-                          <Send className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between border-t border-border px-4 py-2">
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          id="render-tool-calls"
-                          checked={hideToolCalls ?? false}
-                          onCheckedChange={setHideToolCalls}
-                          className="scale-90"
-                        />
-                        <Label
-                          htmlFor="render-tool-calls"
-                          className="text-xs text-muted-foreground"
-                        >
-                          Hide tool calls
-                        </Label>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setDebugOpen((p) => !p)}
-                        className={cn(
-                          "flex items-center gap-1 text-xs transition-colors",
-                          debugOpen
-                            ? "text-primary"
-                            : "text-muted-foreground hover:text-foreground"
-                        )}
-                        title="Toggle debug panel"
-                      >
-                        <Bug className="h-3.5 w-3.5" />
-                        Debug
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setSettingsOpen(true)}
-                        className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs transition-colors"
-                        title="Open settings"
-                      >
-                        <Settings className="h-3.5 w-3.5" />
-                        Settings
-                      </button>
-                    </div>
-                  </div>
-                </form>
+          {chatStarted && (
+            <div className="border-t border-border bg-background px-4 py-4">
+              <div className="mx-auto max-w-3xl">
+                <ChatInput
+                  input={input}
+                  setInput={setInput}
+                  handleSubmit={handleSubmit}
+                  isLoading={isLoading}
+                  stream={stream}
+                  hideToolCalls={hideToolCalls}
+                  setHideToolCalls={setHideToolCalls}
+                  debugOpen={debugOpen}
+                  setDebugOpen={setDebugOpen}
+                  textareaRef={chatInputRef}
+                  placeholder="How can I support you today?"
+                  onSettingsClick={() => setSettingsOpen(true)}
+                />
               </div>
             </div>
-          </div>
+          )}
 
           {/* Debug Panel */}
           {debugOpen && (

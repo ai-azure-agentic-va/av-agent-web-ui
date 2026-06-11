@@ -20,7 +20,6 @@ import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
 import { Bot } from "lucide-react";
-import { SourcesList } from "./sources";
 import { MessageFeedback } from "@/components/thread/feedback";
 import { DebugSection } from "./debug-section";
 
@@ -125,6 +124,8 @@ export function AssistantMessage({
   );
 
   const thread = useStreamContext();
+  const streamingMessageId = thread.streamingMessageId as string | null;
+  const isStreaming = !!streamingMessageId && streamingMessageId === message?.id;
   const isLastMessage =
     thread.messages[thread.messages.length - 1].id === message?.id;
   const hasNoAIOrToolMessages = !thread.messages.find(
@@ -163,9 +164,7 @@ export function AssistantMessage({
       : null;
 
   const apiUrl = (process.env.NEXT_PUBLIC_API_URL ?? "/api").replace(/\/$/, "");
-  console.log("lastDonePayload:", thread.lastDonePayload);
-  console.log("isLastMessage:", isLastMessage);
-  console.log("isLoading:", isLoading);
+
   if (isToolResult && hideToolCalls) {
     return null;
   }
@@ -193,9 +192,13 @@ export function AssistantMessage({
           <>
             {contentString.length > 0 && (
               <div className="prose prose-sm dark:prose-invert max-w-none">
-                <MarkdownText>
-                  {linkifyCitations(contentString, sources)}
-                </MarkdownText>
+                {isStreaming ? (
+                  <p className="whitespace-pre-wrap">{contentString}</p>
+                ) : (
+                  <MarkdownText>
+                    {linkifyCitations(contentString, sources)}
+                  </MarkdownText>
+                )}
               </div>
             )}
 

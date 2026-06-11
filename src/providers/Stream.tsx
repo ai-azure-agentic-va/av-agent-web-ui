@@ -116,6 +116,7 @@ type ParentAgentStreamContext = {
   followUpQuestions: string[];
   thinkingStep: string;
   lastDonePayload: unknown;
+  streamingMessageId: string | null;
 };
 
 type StreamContextType = ParentAgentStreamContext & Record<string, any>;
@@ -322,15 +323,26 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const [followUpQuestions, setFollowUpQuestions] = useState<string[]>([]);
   const [thinkingStep, setThinkingStep] = useState<string>("");
   const [lastDonePayload, setLastDonePayload] = useState<unknown>(null);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const pendingLocalThreadRef = useRef<string | null>(null);
   const { refreshThreads } = useThreads();
+
+  // Refs used by the RAF-based token flush loop — avoids stale closures
+  const pendingContentRef = useRef<string | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const streamingMessageIdRef = useRef<string | null>(null);
+  const streamingMessageAddedRef = useRef(false);
 
   const values = useMemo<StateType>(() => ({ messages, ui: [] }), [messages]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
     setIsLoading(false);
     setThinkingStep("");
   }, []);
@@ -427,9 +439,50 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Reset streaming refs for this turn
       const streamingMessageId = uuidv4();
-      let streamingMessageAdded = false;
+      streamingMessageIdRef.current = streamingMessageId;
+      setStreamingMessageId(streamingMessageId);
+      streamingMessageAddedRef.current = false;
+      pendingContentRef.current = null;
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+
       let accumulatedContent = "";
+
+      // RAF loop: runs at display refresh rate (~60fps), flushes whatever
+      // content has accumulated since the last frame. This runs in a real
+      // browser paint callback so React cannot batch it away.
+      function scheduleRaf() {
+        if (rafRef.current !== null) return; // already scheduled
+        rafRef.current = requestAnimationFrame(() => {
+          rafRef.current = null;
+          const content = pendingContentRef.current;
+          if (content === null) return;
+          pendingContentRef.current = null; // consume
+
+          const msgId = streamingMessageIdRef.current;
+          if (!msgId) return;
+
+          if (!streamingMessageAddedRef.current) {
+            streamingMessageAddedRef.current = true;
+            setMessages((current) => [
+              ...current,
+              { id: msgId, type: "ai", content },
+            ]);
+          } else {
+            setMessages((current) => {
+              const idx = current.findIndex((m) => m.id === msgId);
+              if (idx === -1) return current;
+              const updated = [...current];
+              updated[idx] = { ...updated[idx], content };
+              return updated;
+            });
+          }
+        });
+      }
 
       try {
         const response = await fetch(`${apiUrl}/chat/stream`, {
@@ -463,28 +516,22 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
         const result = await readParentAgentStream(response, {
           onToken: (token) => {
             accumulatedContent += token;
-            if (!streamingMessageAdded) {
-              streamingMessageAdded = true;
-              setMessages((current) => [
-                ...current,
-                { id: streamingMessageId, type: "ai", content: accumulatedContent },
-              ]);
-            } else {
-              setMessages((current) => {
-                const idx = current.findIndex(
-                  (m) => m.id === streamingMessageId,
-                );
-                if (idx === -1) return current;
-                const updated = [...current];
-                updated[idx] = { ...updated[idx], content: accumulatedContent };
-                return updated;
-              });
-            }
+            // Write latest content into the ref and schedule a RAF flush.
+            // Multiple tokens arriving before the next frame are naturally
+            // batched — one render per frame (~16ms) instead of one per token.
+            pendingContentRef.current = accumulatedContent;
+            scheduleRaf();
           },
           onThinkingStep: (step) => {
             setThinkingStep(step);
           },
         });
+
+        // Cancel any pending RAF — we're about to do a final synchronous update
+        if (rafRef.current !== null) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+        }
 
         const finalContent =
           result.answer ||
@@ -493,19 +540,22 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
         setLastDonePayload(result.rawPayload ?? null);
 
-        if (streamingMessageAdded) {
-          setMessages((current) => {
-            const idx = current.findIndex((m) => m.id === streamingMessageId);
-            if (idx === -1) return current;
-            const updated = [...current];
-            updated[idx] = { ...updated[idx], content: finalContent };
-            return updated;
-          });
-        } else {
-          setMessages((current) => [
-            ...current,
-            { id: streamingMessageId, type: "ai", content: finalContent },
-          ]);
+        const msgId = streamingMessageIdRef.current;
+        if (msgId) {
+          if (streamingMessageAddedRef.current) {
+            setMessages((current) => {
+              const idx = current.findIndex((m) => m.id === msgId);
+              if (idx === -1) return current;
+              const updated = [...current];
+              updated[idx] = { ...updated[idx], content: finalContent };
+              return updated;
+            });
+          } else {
+            setMessages((current) => [
+              ...current,
+              { id: msgId, type: "ai", content: finalContent },
+            ]);
+          }
         }
 
         if (result.sources?.length) {
@@ -536,6 +586,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
         }
       } finally {
         abortRef.current = null;
+        streamingMessageIdRef.current = null;
+        pendingContentRef.current = null;
+        setStreamingMessageId(null);
         setIsLoading(false);
         setThinkingStep("");
       }
@@ -571,6 +624,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       followUpQuestions,
       thinkingStep,
       lastDonePayload,
+      streamingMessageId,
     }),
     [
       debugMap,
@@ -582,6 +636,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       messages,
       sourcesMap,
       stop,
+      streamingMessageId,
       submit,
       thinkingStep,
       values,

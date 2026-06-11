@@ -93,13 +93,28 @@ async function handleRequest(
 
     const backendUrl = BACKEND_API_URL.replace(/\/$/, "");
     const res = await fetch(`${backendUrl}/${path}${qs}`, options);
+
+    const isEventStream = res.headers.get("content-type")?.includes("text/event-stream");
+
+    const responseHeaders: Record<string, string> = {
+      ...Object.fromEntries(res.headers.entries()),
+      ...getCorsHeaders(),
+    };
+
+    if (isEventStream) {
+      responseHeaders["Content-Type"] = "text/event-stream";
+      responseHeaders["Cache-Control"] = "no-cache, no-transform";
+      responseHeaders["Connection"] = "keep-alive";
+      responseHeaders["X-Accel-Buffering"] = "no";
+      // Remove transfer-encoding and content-length which can cause buffering
+      delete responseHeaders["content-length"];
+      delete responseHeaders["transfer-encoding"];
+    }
+
     return new NextResponse(res.body, {
       status: res.status,
       statusText: res.statusText,
-      headers: {
-        ...Object.fromEntries(res.headers.entries()),
-        ...getCorsHeaders(),
-      },
+      headers: responseHeaders,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: e.status ?? 500 });
