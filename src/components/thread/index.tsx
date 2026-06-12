@@ -315,15 +315,16 @@ export function Thread() {
     prevMessageLength.current = messages.length;
   }, [messages]);
 
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (input.trim().length === 0 || isLoading) return;
+  const handleSubmit = (e: FormEvent | null, overrideText?: string) => {
+    e?.preventDefault();
+    const text = (overrideText ?? input).trim();
+    if (text.length === 0 || isLoading) return;
     setFirstTokenReceived(false);
 
     const newHumanMessage: Message = {
       id: uuidv4(),
       type: "human",
-      content: [{ type: "text", text: input }] as Message["content"],
+      content: [{ type: "text", text }] as Message["content"],
     };
 
     const toolMessages = ensureToolCallsHaveResponses(stream.messages);
@@ -350,7 +351,9 @@ export function Thread() {
       }
     );
 
-    setInput("");
+    // Only clear the composer for a typed message; a follow-up chip click
+    // (overrideText) leaves any half-typed input untouched.
+    if (overrideText === undefined) setInput("");
   };
 
   const handleStarterPrompt = (message: string) => {
@@ -372,12 +375,11 @@ export function Thread() {
     );
   };
 
-  // Put a follow-up suggestion into the input box (editable) instead of
-  // auto-submitting; the user presses Send/Enter to run it.
-  const fillFollowUp = (question: string) => {
-    if (isLoading) return;
-    setInput(question);
-    requestAnimationFrame(() => chatInputRef.current?.focus());
+  // Clicking a follow-up suggestion sends it immediately as a new turn,
+  // through the same submit path as the composer (tool-call reconciliation,
+  // context, and rag_enabled config all preserved).
+  const handleFollowUpClick = (question: string) => {
+    handleSubmit(null, question);
   };
 
   const handleRegenerate = (
@@ -621,7 +623,7 @@ export function Thread() {
                                     {followUps.map((q, i) => (
                                       <button
                                         key={i}
-                                        onClick={() => fillFollowUp(q)}
+                                        onClick={() => handleFollowUpClick(q)}
                                         className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-foreground transition-colors hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
                                       >
                                         {q}
