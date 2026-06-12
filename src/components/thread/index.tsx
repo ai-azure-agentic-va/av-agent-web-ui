@@ -16,7 +16,6 @@ import {
 import { ETSLogo } from "../icons/ets-logo";
 import {
   ArrowDown,
-  Bug,
   LoaderCircle,
   PanelLeftClose,
   PanelLeft,
@@ -112,8 +111,6 @@ type ChatInputProps = {
   stream: { isLoading: boolean; stop: () => void };
   hideToolCalls: boolean | null;
   setHideToolCalls: (v: boolean) => void;
-  debugOpen: boolean | null;
-  setDebugOpen: (v: boolean | ((p: boolean) => boolean)) => void;
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
   placeholder?: string;
   onSettingsClick?: () => void;
@@ -127,8 +124,6 @@ function ChatInput({
   stream,
   hideToolCalls,
   setHideToolCalls,
-  debugOpen,
-  setDebugOpen,
   textareaRef,
   placeholder = "Message Enterprise Technology Services...",
   onSettingsClick,
@@ -156,7 +151,7 @@ function ChatInput({
             }}
             placeholder={placeholder}
             rows={1}
-            className="field-sizing-content min-h-[44px] max-h-[200px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-0"
+            className="field-sizing-content min-h-[44px] max-h-[200px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-0"
           />
           <div className="flex items-center gap-1 pb-1">
             {stream.isLoading ? (
@@ -197,20 +192,6 @@ function ChatInput({
                 Hide tool calls
               </Label>
             </div>
-            <button
-              type="button"
-              onClick={() => setDebugOpen((p) => !p)}
-              className={cn(
-                "flex items-center gap-1 text-xs transition-colors",
-                debugOpen
-                  ? "text-primary"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-              title="Toggle debug panel"
-            >
-              <Bug className="h-3.5 w-3.5" />
-              Debug
-            </button>
             {onSettingsClick && (
               <button
                 type="button"
@@ -536,9 +517,6 @@ export function Thread() {
                         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
                           ETS Virtual Assistant
                         </h1>
-                        <p className="mt-1 text-base text-muted-foreground">
-                          How can I support you today?
-                        </p>
                       </div>
 
                       {/* Search Box */}
@@ -551,8 +529,6 @@ export function Thread() {
                           stream={stream}
                           hideToolCalls={hideToolCalls}
                           setHideToolCalls={setHideToolCalls}
-                          debugOpen={debugOpen}
-                          setDebugOpen={setDebugOpen}
                           textareaRef={chatInputRef}
                           placeholder="How can I support you today?"
                           onSettingsClick={() => setSettingsOpen(true)}
@@ -684,8 +660,6 @@ export function Thread() {
                   stream={stream}
                   hideToolCalls={hideToolCalls}
                   setHideToolCalls={setHideToolCalls}
-                  debugOpen={debugOpen}
-                  setDebugOpen={setDebugOpen}
                   textareaRef={chatInputRef}
                   placeholder="How can I support you today?"
                   onSettingsClick={() => setSettingsOpen(true)}
