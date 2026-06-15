@@ -86,35 +86,6 @@ function StickyToBottomContent(props: {
   );
 }
 
-function StreamingAutoScroll({
-  isLoading,
-  messages,
-}: {
-  isLoading: boolean;
-  messages: Message[];
-}) {
-  const { scrollToBottom } = useStickToBottomContext();
-
-  // Signal that changes only when streamed content actually grows.
-  const lastMessage = messages[messages.length - 1];
-  const lastContentLength = lastMessage
-    ? getContentString(lastMessage.content).length
-    : 0;
-
-  useEffect(() => {
-    if (isLoading) {
-      scrollToBottom();
-    }
-    // Depend on primitives only. `messages` (a fresh array each render from
-    // useStream) and `scrollToBottom` (a fresh ref each render) both changing
-    // every render — combined with scrollToBottom() triggering a re-render —
-    // produced an infinite update loop ("Maximum update depth exceeded").
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, messages.length, lastContentLength]);
-
-  return null;
-}
-
 function ScrollToBottom(props: { className?: string }) {
   const { isAtBottom, scrollToBottom } = useStickToBottomContext();
 
@@ -547,10 +518,6 @@ export function Thread() {
 
           {/* Chat Area */}
           <StickToBottom className="relative flex-1 overflow-hidden">
-            <StreamingAutoScroll
-              isLoading={isLoading}
-              messages={messages}
-            />
             <StickyToBottomContent
               className={cn(
                 "scrollbar-thin absolute inset-0 overflow-y-auto px-4",
