@@ -1,5 +1,12 @@
 import { v4 as uuidv4 } from "uuid";
-import { Fragment, ReactNode, RefObject, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  ReactNode,
+  RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
@@ -7,7 +14,11 @@ import { FormEvent } from "react";
 import { getContentString, extractFollowUps } from "./utils";
 import { Button } from "../ui/button";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
-import { AssistantMessage, AssistantMessageLoading, ThinkingIndicator } from "./messages/ai";
+import {
+  AssistantMessage,
+  AssistantMessageLoading,
+  ThinkingIndicator,
+} from "./messages/ai";
 import { HumanMessage } from "./messages/human";
 import {
   DO_NOT_RENDER_ID_PREFIX,
@@ -33,7 +44,7 @@ import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
-import { ThemeToggle } from "../ui/theme-toggle";
+import { Skeleton } from "../ui/skeleton";
 import {
   Tooltip,
   TooltipContent,
@@ -64,7 +75,10 @@ function StickyToBottomContent(props: {
       style={{ width: "100%", height: "100%" }}
       className={props.className}
     >
-      <div ref={context.contentRef} className={props.contentClassName}>
+      <div
+        ref={context.contentRef}
+        className={props.contentClassName}
+      >
         {props.content}
       </div>
       {props.footer}
@@ -72,14 +86,31 @@ function StickyToBottomContent(props: {
   );
 }
 
-function StreamingAutoScroll({ isLoading, messages }: { isLoading: boolean; messages: Message[] }) {
+function StreamingAutoScroll({
+  isLoading,
+  messages,
+}: {
+  isLoading: boolean;
+  messages: Message[];
+}) {
   const { scrollToBottom } = useStickToBottomContext();
+
+  // Signal that changes only when streamed content actually grows.
+  const lastMessage = messages[messages.length - 1];
+  const lastContentLength = lastMessage
+    ? getContentString(lastMessage.content).length
+    : 0;
 
   useEffect(() => {
     if (isLoading) {
       scrollToBottom();
     }
-  }, [isLoading, messages, scrollToBottom]);
+    // Depend on primitives only. `messages` (a fresh array each render from
+    // useStream) and `scrollToBottom` (a fresh ref each render) both changing
+    // every render — combined with scrollToBottom() triggering a re-render —
+    // produced an infinite update loop ("Maximum update depth exceeded").
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, messages.length, lastContentLength]);
 
   return null;
 }
@@ -93,8 +124,8 @@ function ScrollToBottom(props: { className?: string }) {
       variant="secondary"
       size="icon"
       className={cn(
-        "h-10 w-10 rounded-full shadow-lg border border-border",
-        props.className
+        "border-border h-10 w-10 rounded-full border shadow-lg",
+        props.className,
       )}
       onClick={() => scrollToBottom()}
     >
@@ -129,8 +160,11 @@ function ChatInput({
   onSettingsClick,
 }: ChatInputProps) {
   return (
-    <div className="relative rounded-2xl border border-border bg-card shadow-sm">
-      <form onSubmit={handleSubmit} className="flex flex-col">
+    <div className="border-border bg-card relative rounded-2xl border shadow-sm">
+      <form
+        onSubmit={handleSubmit}
+        className="flex flex-col"
+      >
         <div className="flex items-end gap-2 p-3">
           <textarea
             ref={textareaRef}
@@ -151,7 +185,7 @@ function ChatInput({
             }}
             placeholder={placeholder}
             rows={1}
-            className="field-sizing-content min-h-[44px] max-h-[200px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-0"
+            className="placeholder:text-muted-foreground/50 field-sizing-content max-h-[200px] min-h-[44px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm focus:ring-0 focus:outline-none"
           />
           <div className="flex items-center gap-1 pb-1">
             {stream.isLoading ? (
@@ -176,33 +210,40 @@ function ChatInput({
             )}
           </div>
         </div>
-        <div className="flex items-center justify-between border-t border-border px-4 py-2">
+        <div className="border-border flex items-center justify-between border-t px-4 py-2">
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Switch
-                id="render-tool-calls"
-                checked={hideToolCalls ?? false}
-                onCheckedChange={setHideToolCalls}
-                className="scale-90"
-              />
-              <Label
-                htmlFor="render-tool-calls"
-                className="text-xs text-muted-foreground"
-              >
-                Hide tool calls
-              </Label>
-            </div>
-            {onSettingsClick && (
-              <button
-                type="button"
-                onClick={onSettingsClick}
-                className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                title="Open settings"
-              >
-                <Settings className="h-3.5 w-3.5" />
-                Settings
-              </button>
+            {/* When tool calls are force-hidden via NEXT_PUBLIC_HIDE_TOOL_CALLS,
+                this toggle is moot — omit it from the UI. */}
+            {process.env.NEXT_PUBLIC_HIDE_TOOL_CALLS !== "true" && (
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="render-tool-calls"
+                  checked={hideToolCalls ?? false}
+                  onCheckedChange={setHideToolCalls}
+                  className="scale-90"
+                />
+                <Label
+                  htmlFor="render-tool-calls"
+                  className="text-muted-foreground text-xs"
+                >
+                  Hide tool calls
+                </Label>
+              </div>
             )}
+            {/* The settings button can be hidden entirely via
+                NEXT_PUBLIC_HIDE_SETTINGS_BUTTON. */}
+            {process.env.NEXT_PUBLIC_HIDE_SETTINGS_BUTTON !== "true" &&
+              onSettingsClick && (
+                <button
+                  type="button"
+                  onClick={onSettingsClick}
+                  className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs transition-colors"
+                  title="Open settings"
+                >
+                  <Settings className="h-3.5 w-3.5" />
+                  Settings
+                </button>
+              )}
           </div>
         </div>
       </form>
@@ -217,15 +258,15 @@ export function Thread() {
   const [threadId, _setThreadId] = useQueryState("threadId");
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
-    parseAsBoolean.withDefault(false)
+    parseAsBoolean.withDefault(false),
   );
   const [hideToolCalls, setHideToolCalls] = useQueryState(
     "hideToolCalls",
-    parseAsBoolean.withDefault(false)
+    parseAsBoolean.withDefault(false),
   );
   const [debugOpen, setDebugOpen] = useQueryState(
     "debugPanel",
-    parseAsBoolean.withDefault(false)
+    parseAsBoolean.withDefault(false),
   );
 
   const [input, setInput] = useState("");
@@ -233,6 +274,7 @@ export function Thread() {
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [starterPrompts, setStarterPrompts] = useState<StarterPrompt[]>([]);
+  const [starterPromptsLoading, setStarterPromptsLoading] = useState(true);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
 
   const stream = useStreamContext();
@@ -256,7 +298,8 @@ export function Thread() {
           setStarterPrompts(data.prompts);
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setStarterPromptsLoading(false));
   }, []);
 
   useEffect(() => {
@@ -329,7 +372,7 @@ export function Thread() {
             newHumanMessage,
           ],
         }),
-      }
+      },
     );
 
     // Only clear the composer for a typed message; a follow-up chip click
@@ -352,7 +395,7 @@ export function Thread() {
           ...prev,
           messages: [...(prev.messages ?? []), newHumanMessage],
         }),
-      }
+      },
     );
   };
 
@@ -364,7 +407,7 @@ export function Thread() {
   };
 
   const handleRegenerate = (
-    parentCheckpoint: Checkpoint | null | undefined
+    parentCheckpoint: Checkpoint | null | undefined,
   ) => {
     prevMessageLength.current = prevMessageLength.current - 1;
     setFirstTokenReceived(false);
@@ -379,15 +422,15 @@ export function Thread() {
 
   const chatStarted = !!threadId || !!messages.length;
   const hasNoAIOrToolMessages = !messages.find(
-    (m) => m.type === "ai" || m.type === "tool"
+    (m) => m.type === "ai" || m.type === "tool",
   );
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
+    <div className="bg-background flex h-screen w-full overflow-hidden">
       {/* Sidebar */}
       <div className="relative hidden lg:flex">
         <motion.div
-          className="absolute z-20 h-full overflow-hidden border-r border-border bg-sidebar"
+          className="border-border bg-sidebar absolute z-20 h-full overflow-hidden border-r"
           style={{ width: 280 }}
           animate={
             isLargeScreen
@@ -401,7 +444,10 @@ export function Thread() {
               : { duration: 0 }
           }
         >
-          <div className="relative h-full" style={{ width: 280 }}>
+          <div
+            className="relative h-full"
+            style={{ width: 280 }}
+          >
             <ThreadHistory />
           </div>
         </motion.div>
@@ -411,13 +457,13 @@ export function Thread() {
       <div
         className={cn(
           "grid w-full grid-cols-[1fr_0fr] transition-all duration-500",
-          artifactOpen && "grid-cols-[3fr_2fr]"
+          artifactOpen && "grid-cols-[3fr_2fr]",
         )}
       >
         <motion.div
           className={cn(
             "relative flex min-w-0 flex-1 flex-col overflow-hidden",
-            !chatStarted && "grid-rows-[1fr]"
+            !chatStarted && "grid-rows-[1fr]",
           )}
           layout={isLargeScreen}
           animate={{
@@ -435,7 +481,7 @@ export function Thread() {
           }
         >
           {/* Header */}
-          <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-sm">
+          <header className="border-border bg-background/80 sticky top-0 z-10 flex h-14 items-center justify-between border-b px-4 backdrop-blur-sm">
             <div className="flex items-center gap-3">
               <TooltipProvider>
                 <Tooltip>
@@ -473,20 +519,24 @@ export function Thread() {
                 className="flex cursor-pointer items-center gap-2.5"
                 onClick={() => setThreadId(null)}
               >
-                <ETSLogo width={28} height={28} />
-                <span className="text-lg font-semibold tracking-tight text-foreground">
+                <ETSLogo
+                  width={28}
+                  height={28}
+                />
+                <span className="text-foreground text-lg font-semibold tracking-tight">
                   ETS Virtual Assistant
                 </span>
               </button>
             </div>
 
             <div className="flex items-center gap-2">
-              <ThemeToggle />
               {ssoEnabled && (
                 <Button
                   variant="ghost"
-                  className="h-9 gap-2 px-3 text-sm text-muted-foreground hover:text-destructive"
-                  onClick={() => { window.location.href = "/api/auth/logout"; }}
+                  className="text-muted-foreground hover:text-destructive h-9 gap-2 px-3 text-sm"
+                  onClick={() => {
+                    window.location.href = "/api/auth/logout";
+                  }}
                 >
                   <LogOut className="h-4 w-4" />
                   Log out
@@ -497,24 +547,30 @@ export function Thread() {
 
           {/* Chat Area */}
           <StickToBottom className="relative flex-1 overflow-hidden">
-            <StreamingAutoScroll isLoading={isLoading} messages={messages} />
+            <StreamingAutoScroll
+              isLoading={isLoading}
+              messages={messages}
+            />
             <StickyToBottomContent
               className={cn(
-                "absolute inset-0 overflow-y-auto scrollbar-thin px-4",
+                "scrollbar-thin absolute inset-0 overflow-y-auto px-4",
                 !chatStarted && "flex flex-col items-center justify-center",
-                chatStarted && "grid grid-rows-[1fr_auto]"
+                chatStarted && "grid grid-rows-[1fr_auto]",
               )}
               contentClassName={cn(
                 "w-full max-w-3xl mx-auto flex flex-col gap-6",
-                chatStarted && "pt-8 pb-32"
+                chatStarted && "pt-8 pb-32",
               )}
               content={
                 <>
                   {!chatStarted && (
                     <div className="flex w-full flex-col items-center gap-6 text-center">
-                      <ETSLogo width={48} height={48} />
+                      <ETSLogo
+                        width={48}
+                        height={48}
+                      />
                       <div>
-                        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                        <h1 className="text-foreground text-2xl font-semibold tracking-tight">
                           ETS Virtual Assistant
                         </h1>
                       </div>
@@ -536,26 +592,42 @@ export function Thread() {
                       </div>
 
                       {/* Starter Prompts */}
-                      {starterPrompts.length > 0 && (
+                      {starterPromptsLoading ? (
                         <div className="grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
-                          {starterPrompts.map((prompt, i) => (
-                            <button
+                          {Array.from({ length: 4 }).map((_, i) => (
+                            <div
                               key={i}
-                              onClick={() => handleStarterPrompt(prompt.message)}
-                              disabled={isLoading}
-                              className="rounded-xl border border-border bg-card px-4 py-3.5 text-left shadow-sm transition-all hover:border-primary/40 hover:bg-accent hover:shadow-md disabled:opacity-50"
+                              className="border-border bg-card rounded-xl border px-4 py-3.5 shadow-sm"
                             >
-                              <p className="text-sm font-semibold text-foreground">
-                                {prompt.label || prompt.message}
-                              </p>
-                              {prompt.label && (
-                                <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                                  {prompt.message}
-                                </p>
-                              )}
-                            </button>
+                              <Skeleton className="h-4 w-2/3" />
+                              <Skeleton className="mt-2 h-3 w-full" />
+                            </div>
                           ))}
                         </div>
+                      ) : (
+                        starterPrompts.length > 0 && (
+                          <div className="grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
+                            {starterPrompts.map((prompt, i) => (
+                              <button
+                                key={i}
+                                onClick={() =>
+                                  handleStarterPrompt(prompt.message)
+                                }
+                                disabled={isLoading}
+                                className="border-border bg-card hover:border-primary/40 hover:bg-accent rounded-xl border px-4 py-3.5 text-left shadow-sm transition-all hover:shadow-md disabled:opacity-50"
+                              >
+                                <p className="text-foreground text-sm font-semibold">
+                                  {prompt.label || prompt.message}
+                                </p>
+                                {prompt.label && (
+                                  <p className="text-muted-foreground mt-1 line-clamp-2 text-xs">
+                                    {prompt.message}
+                                  </p>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        )
                       )}
                     </div>
                   )}
@@ -587,12 +659,12 @@ export function Thread() {
                               const followUps = isStreamingLast
                                 ? []
                                 : extractFollowUps(
-                                    getContentString(message.content)
+                                    getContentString(message.content),
                                   );
                               if (!followUps.length) return null;
                               return (
                                 <div className="flex flex-col gap-2 pb-2">
-                                  <p className="text-xs font-medium text-muted-foreground">
+                                  <p className="text-muted-foreground text-xs font-medium">
                                     Want to explore further?
                                   </p>
                                   <div className="flex flex-wrap gap-2">
@@ -600,7 +672,7 @@ export function Thread() {
                                       <button
                                         key={i}
                                         onClick={() => handleFollowUpClick(q)}
-                                        className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-foreground transition-colors hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
+                                        className="border-border bg-card text-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary rounded-full border px-3 py-1.5 text-xs transition-colors"
                                       >
                                         {q}
                                       </button>
@@ -610,7 +682,7 @@ export function Thread() {
                               );
                             })()}
                           </Fragment>
-                        )
+                        ),
                       )}
 
                   {hasNoAIOrToolMessages && !!stream.interrupt && (
@@ -623,25 +695,29 @@ export function Thread() {
                   )}
 
                   {isLoading && !firstTokenReceived && (
-                    <AssistantMessageLoading thinkingStep={stream.thinkingStep} />
+                    <AssistantMessageLoading
+                      thinkingStep={stream.thinkingStep}
+                    />
                   )}
 
-                  {isLoading && firstTokenReceived && (() => {
-                    const lastMessage = messages[messages.length - 1];
-                    const isAfterToolCall = lastMessage?.type === "tool" ||
-                      (lastMessage?.type === "ai" &&
-                       "tool_calls" in lastMessage &&
-                       lastMessage.tool_calls &&
-                       lastMessage.tool_calls.length > 0);
-                    return isAfterToolCall ? <ThinkingIndicator /> : null;
-                  })()}
-
+                  {isLoading &&
+                    firstTokenReceived &&
+                    (() => {
+                      const lastMessage = messages[messages.length - 1];
+                      const isAfterToolCall =
+                        lastMessage?.type === "tool" ||
+                        (lastMessage?.type === "ai" &&
+                          "tool_calls" in lastMessage &&
+                          lastMessage.tool_calls &&
+                          lastMessage.tool_calls.length > 0);
+                      return isAfterToolCall ? <ThinkingIndicator /> : null;
+                    })()}
                 </>
               }
               footer={
                 chatStarted && (
-                  <div className="pointer-events-none absolute bottom-6 right-6">
-                    <ScrollToBottom className="pointer-events-auto animate-in fade-in-0 zoom-in-95" />
+                  <div className="pointer-events-none absolute right-6 bottom-6">
+                    <ScrollToBottom className="animate-in fade-in-0 zoom-in-95 pointer-events-auto" />
                   </div>
                 )
               }
@@ -650,7 +726,7 @@ export function Thread() {
 
           {/* Input Area */}
           {chatStarted && (
-            <div className="border-t border-border bg-background px-4 py-4">
+            <div className="border-border bg-background border-t px-4 py-4">
               <div className="mx-auto max-w-3xl">
                 <ChatInput
                   input={input}
@@ -670,10 +746,10 @@ export function Thread() {
 
           {/* Debug Panel */}
           {debugOpen && (
-            <div className="border-t border-border bg-muted/40 px-4 py-3 text-xs">
+            <div className="border-border bg-muted/40 border-t px-4 py-3 text-xs">
               <div className="mx-auto max-w-3xl space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-semibold text-foreground">Debug Panel</h3>
+                  <h3 className="text-foreground font-semibold">Debug Panel</h3>
                   <button
                     onClick={() => setDebugOpen(false)}
                     className="text-muted-foreground hover:text-foreground"
@@ -684,22 +760,23 @@ export function Thread() {
 
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
                   <div>
-                    <p className="font-medium text-foreground">Thread ID</p>
-                    <p className="break-all font-mono text-muted-foreground">
+                    <p className="text-foreground font-medium">Thread ID</p>
+                    <p className="text-muted-foreground font-mono break-all">
                       {threadId || "—"}
                     </p>
                   </div>
                   <div>
-                    <p className="font-medium text-foreground">Messages</p>
+                    <p className="text-foreground font-medium">Messages</p>
                     <p className="text-muted-foreground">
                       {stream.messages.length} total (
                       {stream.messages.filter((m) => m.type === "human").length}{" "}
                       human,{" "}
-                      {stream.messages.filter((m) => m.type === "ai").length} AI)
+                      {stream.messages.filter((m) => m.type === "ai").length}{" "}
+                      AI)
                     </p>
                   </div>
                   <div>
-                    <p className="font-medium text-foreground">Status</p>
+                    <p className="text-foreground font-medium">Status</p>
                     <p className="text-muted-foreground">
                       {isLoading
                         ? `Loading${stream.thinkingStep ? ` — ${stream.thinkingStep}` : ""}`
@@ -707,7 +784,7 @@ export function Thread() {
                     </p>
                   </div>
                   <div>
-                    <p className="font-medium text-foreground">Follow-ups</p>
+                    <p className="text-foreground font-medium">Follow-ups</p>
                     <p className="text-muted-foreground">
                       {stream.followUpQuestions.length} suggestions
                     </p>
@@ -716,10 +793,10 @@ export function Thread() {
 
                 {stream.lastDonePayload != null && (
                   <div>
-                    <p className="mb-1 font-medium text-foreground">
+                    <p className="text-foreground mb-1 font-medium">
                       Last Response Payload
                     </p>
-                    <pre className="max-h-48 overflow-auto rounded border border-border bg-background p-2 font-mono text-[10px] text-muted-foreground">
+                    <pre className="border-border bg-background text-muted-foreground max-h-48 overflow-auto rounded border p-2 font-mono text-[10px]">
                       {JSON.stringify(stream.lastDonePayload, null, 2)}
                     </pre>
                   </div>
@@ -730,9 +807,9 @@ export function Thread() {
         </motion.div>
 
         {/* Artifact Panel */}
-        <div className="relative flex flex-col border-l border-border bg-card">
+        <div className="border-border bg-card relative flex flex-col border-l">
           <div className="absolute inset-0 flex min-w-[30vw] flex-col">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div className="border-border flex items-center justify-between border-b px-4 py-3">
               <ArtifactTitle className="truncate text-sm font-medium" />
               <Button
                 variant="ghost"

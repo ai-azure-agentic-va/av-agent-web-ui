@@ -17,7 +17,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      suppressHydrationWarning
+    >
       <head>
         <link
           href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap"
@@ -28,8 +31,9 @@ export default function RootLayout({
         <AuthSessionProvider>
           <ThemeProvider
             attribute="class"
-            defaultTheme="system"
-            enableSystem
+            defaultTheme="light"
+            forcedTheme="light"
+            enableSystem={false}
             disableTransitionOnChange
           >
             <NuqsAdapter>{children}</NuqsAdapter>

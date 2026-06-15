@@ -8,6 +8,7 @@ import {
   STATE_COOKIE,
   SESSION_MAX_AGE,
 } from "@/lib/msal-auth";
+import { logger } from "@/lib/logger";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
@@ -29,16 +30,23 @@ export async function GET(req: NextRequest) {
   cookieStore.delete(STATE_COOKIE);
 
   if (!user) {
-    console.error("[auth] handleOAuthCallback returned null — token exchange failed");
+    logger.error(
+      "[auth] handleOAuthCallback returned null — token exchange failed",
+    );
     return NextResponse.redirect(`${base}/auth/error`);
   }
 
-  console.log("[auth] user.oid:", user.oid, "user.email:", user.email);
-  console.log("[auth] user.groups:", JSON.stringify(user.groups));
-  console.log("[auth] configured groups — users:", process.env.AI_VA_USERS_GROUP_ID, "admins:", process.env.AI_VA_ADMINS_GROUP_ID);
+  logger.debug("[auth] user.oid:", user.oid, "user.email:", user.email);
+  logger.debug("[auth] user.groups:", JSON.stringify(user.groups));
+  logger.debug(
+    "[auth] configured groups — users:",
+    process.env.AI_VA_USERS_GROUP_ID,
+    "admins:",
+    process.env.AI_VA_ADMINS_GROUP_ID,
+  );
 
   const { allowed } = checkGroupMembership(user.groups);
-  console.log("[auth] checkGroupMembership result:", allowed);
+  logger.debug("[auth] checkGroupMembership result:", allowed);
   if (!allowed) {
     return NextResponse.redirect(`${base}/auth/access-denied`);
   }

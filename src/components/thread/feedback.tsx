@@ -6,10 +6,9 @@ import { cn } from "@/lib/utils";
 
 interface FeedbackProps {
   runId: string | null;
-  apiUrl: string;
 }
 
-export function MessageFeedback({ runId, apiUrl }: FeedbackProps) {
+export function MessageFeedback({ runId }: FeedbackProps) {
   const [submitted, setSubmitted] = useState<"up" | "down" | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showComment, setShowComment] = useState(false);
@@ -23,7 +22,10 @@ export function MessageFeedback({ runId, apiUrl }: FeedbackProps) {
       try {
         const body: Record<string, unknown> = { run_id: runId, score };
         if (feedbackComment?.trim()) body.comment = feedbackComment.trim();
-        await fetch(`${apiUrl}/feedback`, {
+        // Always go through the same-origin Next.js proxy (/api/*), which
+        // injects the user's bearer token server-side. Never call the backend
+        // directly from the browser — it has no Authorization header.
+        await fetch("/api/feedback", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -34,7 +36,7 @@ export function MessageFeedback({ runId, apiUrl }: FeedbackProps) {
         setIsSubmitting(false);
       }
     },
-    [runId, apiUrl, isSubmitting],
+    [runId, isSubmitting],
   );
 
   const handleUp = useCallback(() => {
@@ -71,7 +73,10 @@ export function MessageFeedback({ runId, apiUrl }: FeedbackProps) {
   }
 
   return (
-    <div ref={containerRef} className="relative flex items-center gap-0.5">
+    <div
+      ref={containerRef}
+      className="relative flex items-center gap-0.5"
+    >
       {!submitted && (
         <>
           <button
@@ -79,7 +84,7 @@ export function MessageFeedback({ runId, apiUrl }: FeedbackProps) {
             disabled={isSubmitting}
             title="Good response"
             className={cn(
-              "rounded p-1 text-muted-foreground transition-colors",
+              "text-muted-foreground rounded p-1 transition-colors",
               "hover:bg-accent hover:text-green-600 dark:hover:text-green-400",
               "disabled:cursor-not-allowed disabled:opacity-50",
             )}
@@ -91,7 +96,7 @@ export function MessageFeedback({ runId, apiUrl }: FeedbackProps) {
             disabled={isSubmitting}
             title="Bad response"
             className={cn(
-              "rounded p-1 text-muted-foreground transition-colors",
+              "text-muted-foreground rounded p-1 transition-colors",
               "hover:bg-accent hover:text-red-500 dark:hover:text-red-400",
               "disabled:cursor-not-allowed disabled:opacity-50",
             )}
@@ -103,7 +108,7 @@ export function MessageFeedback({ runId, apiUrl }: FeedbackProps) {
 
       {/* Comment box drops DOWN below the toolbar */}
       {showComment && (
-        <div className="absolute top-full left-0 mt-2 z-20 flex w-72 flex-col gap-2 rounded-md border bg-background p-3 shadow-lg">
+        <div className="bg-background absolute top-full left-0 z-20 mt-2 flex w-72 flex-col gap-2 rounded-md border p-3 shadow-lg">
           <textarea
             value={comment}
             onChange={(e) => setComment(e.target.value)}
@@ -119,7 +124,7 @@ export function MessageFeedback({ runId, apiUrl }: FeedbackProps) {
             className={cn(
               "w-full resize-none rounded-md border px-3 py-2 text-sm",
               "border-input bg-background text-foreground placeholder:text-muted-foreground",
-              "focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring",
+              "focus:border-ring focus:ring-ring focus:ring-1 focus:outline-none",
             )}
           />
           <div className="flex items-center gap-2">
@@ -137,11 +142,11 @@ export function MessageFeedback({ runId, apiUrl }: FeedbackProps) {
             <button
               onClick={handleCommentSkip}
               disabled={isSubmitting}
-              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+              className="text-muted-foreground hover:text-foreground text-xs transition-colors"
             >
               Skip
             </button>
-            <span className="ml-auto text-[10px] text-muted-foreground">
+            <span className="text-muted-foreground ml-auto text-[10px]">
               ⌘+Enter
             </span>
           </div>

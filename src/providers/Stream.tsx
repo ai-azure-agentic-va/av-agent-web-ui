@@ -2,20 +2,28 @@ import React, {
   createContext,
   useCallback,
   useContext,
-  useEffect,
-  ReactNode,
   useMemo,
   useRef,
   useState,
+  ReactNode,
 } from "react";
+import { useStream } from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
 import { useQueryState } from "nuqs";
-import { v4 as uuidv4 } from "uuid";
-import { getContentString } from "@/components/thread/utils";
 import { useThreads } from "@/providers/Thread";
-import { settingsRequestFields } from "@/lib/settings";
 
-export type StateType = { messages: Message[]; ui?: any[] };
+// Best-effort: the standard LangGraph contract streams plain messages. These
+// extra fields (sources / follow-ups / debug / thinking steps) are only
+// populated when the `chat` graph chooses to emit them — either as custom
+// stream events (via get_stream_writer) or by writing them into graph state.
+export type StateType = {
+  messages: Message[];
+  ui?: any[];
+  context?: Record<string, unknown>;
+  follow_up_questions?: string[];
+  sources?: Source[];
+  debug?: DebugPayload;
+};
 
 export type Source = {
   index?: number;
@@ -31,8 +39,6 @@ export type Source = {
   updated_at?: string;
 };
 
-// Mirrors the backend `done.debug` block (api/main.py `_build_debug_payload`):
-// search/chunks/prompt/settings. Rendered as collapsible rows under sources.
 export type DebugSearch = {
   original_query?: string;
   rewritten_query?: string;
@@ -80,37 +86,7 @@ export type DebugPayload = {
   settings?: Record<string, unknown>;
 };
 
-type StreamSubmitInput = {
-  messages?: Message[] | Message;
-  context?: Record<string, unknown>;
-  [key: string]: unknown;
-};
-
-type StreamSubmitOptions = {
-  optimisticValues?: (prev: StateType) => StateType;
-  [key: string]: unknown;
-};
-
-type ParentAgentStreamContext = {
-  messages: Message[];
-  values: StateType;
-  isLoading: boolean;
-  error: Error | undefined;
-  interrupt: undefined;
-  submit: (
-    input?: StreamSubmitInput,
-    options?: StreamSubmitOptions,
-  ) => Promise<void>;
-  stop: () => void;
-  setBranch: (_branch: string) => void;
-  getMessagesMetadata: (_message: Message) => {
-    firstSeenState: {
-      values: StateType;
-      parent_checkpoint: null;
-    };
-    branch: undefined;
-    branchOptions: undefined;
-  };
+type StreamContextType = ReturnType<typeof useStream<StateType>> & {
   sourcesMap: Record<string, Source[]>;
   debugMap: Record<string, DebugPayload>;
   followUpQuestions: string[];
@@ -119,11 +95,10 @@ type ParentAgentStreamContext = {
   streamingMessageId: string | null;
 };
 
-type StreamContextType = ParentAgentStreamContext & Record<string, any>;
-
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
 const DEFAULT_API_URL = "/api";
+const DEFAULT_ASSISTANT_ID = "chat";
 
 const THINKING_STEP_LABELS: Record<string, string> = {
   rewriting_query: "Rewriting query...",
@@ -135,81 +110,8 @@ const THINKING_STEP_LABELS: Record<string, string> = {
   generating: "Generating response...",
 };
 
-function normalizeApiUrl(value: string | undefined): string {
+function normalizeApiUrl(value: string | undefined | null): string {
   return (value || DEFAULT_API_URL).replace(/\/$/, "");
-}
-
-function normalizeMessages(messages?: Message[] | Message): Message[] {
-  if (!messages) return [];
-  return Array.isArray(messages) ? messages : [messages];
-}
-
-function lastHumanMessage(messages: Message[]): Message | undefined {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.type === "human") return messages[i];
-  }
-  return undefined;
-}
-
-function withoutLastAssistantMessage(messages: Message[]): Message[] {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i]?.type === "ai") {
-      return [...messages.slice(0, i), ...messages.slice(i + 1)];
-    }
-  }
-  return messages;
-}
-
-function parseSseEvent(rawEvent: string): { event: string; data: unknown } {
-  let event = "message";
-  const dataLines: string[] = [];
-
-  for (const line of rawEvent.split(/\r?\n/)) {
-    if (line.startsWith("event:")) {
-      event = line.slice("event:".length).trim();
-    } else if (line.startsWith("data:")) {
-      dataLines.push(line.slice("data:".length).trimStart());
-    }
-  }
-
-  const dataText = dataLines.join("\n").trim();
-  if (!dataText) return { event, data: {} };
-
-  try {
-    return { event, data: JSON.parse(dataText) };
-  } catch {
-    return { event, data: dataText };
-  }
-}
-
-function answerFromDonePayload(payload: unknown): {
-  requestId?: string;
-  answer: string;
-  sources?: Source[];
-  followUpQuestions?: string[];
-  debug?: DebugPayload;
-} {
-  if (payload && typeof payload === "object") {
-    const body = payload as Record<string, unknown>;
-    return {
-      requestId:
-        typeof body.request_id === "string" ? body.request_id : undefined,
-      answer: typeof body.answer === "string" ? body.answer : "",
-      sources: Array.isArray(body.sources)
-        ? (body.sources as Source[])
-        : undefined,
-      followUpQuestions: Array.isArray(body.follow_up_questions)
-        ? body.follow_up_questions.filter(
-            (q): q is string => typeof q === "string",
-          )
-        : undefined,
-      debug:
-        body.debug && typeof body.debug === "object"
-          ? (body.debug as DebugPayload)
-          : undefined,
-    };
-  }
-  return { answer: "" };
 }
 
 // Turn raw backend/LLM errors into user-friendly text. Rate-limit (HTTP 429 /
@@ -228,397 +130,170 @@ function friendlyError(raw: string): string {
   return raw || "The backend returned an error.";
 }
 
-async function readParentAgentStream(
-  response: Response,
-  callbacks?: {
-    onToken?: (token: string) => void;
-    onThinkingStep?: (step: string) => void;
-  },
-): Promise<{
-  requestId?: string;
-  answer: string;
-  sources?: Source[];
-  followUpQuestions?: string[];
-  debug?: DebugPayload;
-  rawPayload?: unknown;
-}> {
-  if (!response.body) {
-    const body = await response.json();
-    return { ...answerFromDonePayload(body), rawPayload: body };
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function lastAiMessageId(messages: Message[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m?.type === "ai" && m.id) return m.id;
   }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let donePayload: unknown;
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const events = buffer.split(/\r?\n\r?\n/);
-    buffer = events.pop() ?? "";
-
-    for (const rawEvent of events) {
-      const parsed = parseSseEvent(rawEvent.trim());
-
-      if (parsed.event === "token" || parsed.event === "text") {
-        const data = parsed.data as Record<string, unknown>;
-        const token =
-          typeof parsed.data === "string"
-            ? parsed.data
-            : typeof data?.token === "string"
-              ? data.token
-              : null;
-        if (token) callbacks?.onToken?.(token);
-      }
-
-      if (parsed.event === "thinking" || parsed.event === "event") {
-        const data = parsed.data as Record<string, unknown>;
-        const step =
-          (typeof data?.event === "string" ? data.event : "") ||
-          (typeof data?.step === "string" ? data.step : "");
-        if (step) {
-          callbacks?.onThinkingStep?.(THINKING_STEP_LABELS[step] || step);
-        }
-      }
-
-      if (parsed.event === "done") {
-        donePayload = parsed.data;
-      }
-
-      if (parsed.event === "error") {
-        const errorBody =
-          parsed.data && typeof parsed.data === "object"
-            ? (parsed.data as Record<string, unknown>)
-            : {};
-        const detail =
-          typeof errorBody.detail === "string"
-            ? errorBody.detail
-            : "The backend returned an error.";
-        throw new Error(friendlyError(detail));
-      }
-    }
-  }
-
-  if (!donePayload && buffer.trim()) {
-    const parsed = parseSseEvent(buffer.trim());
-    if (parsed.event === "done") donePayload = parsed.data;
-  }
-
-  return { ...answerFromDonePayload(donePayload), rawPayload: donePayload };
+  return null;
 }
 
 export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
   const apiUrl = normalizeApiUrl(process.env.NEXT_PUBLIC_API_URL);
+  const assistantId =
+    process.env.NEXT_PUBLIC_ASSISTANT_ID || DEFAULT_ASSISTANT_ID;
   const [threadId, setThreadId] = useQueryState("threadId");
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | undefined>();
-  const [sourcesMap, setSourcesMap] = useState<Record<string, Source[]>>({});
-  const [debugMap, setDebugMap] = useState<Record<string, DebugPayload>>({});
-  const [followUpQuestions, setFollowUpQuestions] = useState<string[]>([]);
-  const [thinkingStep, setThinkingStep] = useState<string>("");
-  const [lastDonePayload, setLastDonePayload] = useState<unknown>(null);
-  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const pendingLocalThreadRef = useRef<string | null>(null);
   const { refreshThreads } = useThreads();
 
-  // Refs used by the RAF-based token flush loop — avoids stale closures
-  const pendingContentRef = useRef<string | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const streamingMessageIdRef = useRef<string | null>(null);
-  const streamingMessageAddedRef = useRef(false);
+  // Best-effort custom UI state. Populated only when the graph emits matching
+  // custom stream events / state; otherwise stays empty.
+  const [sourcesMap, setSourcesMap] = useState<Record<string, Source[]>>({});
+  const [debugMap, setDebugMap] = useState<Record<string, DebugPayload>>({});
+  const [customFollowUps, setCustomFollowUps] = useState<string[]>([]);
+  const [thinkingStep, setThinkingStep] = useState<string>("");
+  const [lastDonePayload, setLastDonePayload] = useState<unknown>(null);
+  const [errorOverride, setErrorOverride] = useState<Error | undefined>();
 
-  const values = useMemo<StateType>(() => ({ messages, ui: [] }), [messages]);
+  // Harvested during a run, committed to the keyed maps on finish.
+  const pendingSourcesRef = useRef<Source[] | null>(null);
+  const pendingDebugRef = useRef<DebugPayload | null>(null);
+  const runIdRef = useRef<string | null>(null);
 
-  const stop = useCallback(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-    setIsLoading(false);
+  const resetTurnState = useCallback(() => {
+    setCustomFollowUps([]);
     setThinkingStep("");
+    setErrorOverride(undefined);
+    pendingSourcesRef.current = null;
+    pendingDebugRef.current = null;
+    runIdRef.current = null;
   }, []);
 
-  useEffect(() => {
-    if (!threadId) {
-      pendingLocalThreadRef.current = null;
-      setMessages([]);
-      setError(undefined);
-      setFollowUpQuestions([]);
-      setThinkingStep("");
+  const harvestCustomEvent = useCallback((data: unknown) => {
+    // A plain string is treated as a thinking-step label.
+    if (typeof data === "string") {
+      setThinkingStep(THINKING_STEP_LABELS[data] || data);
       return;
     }
+    if (!data || typeof data !== "object") return;
+    const body = data as Record<string, unknown>;
 
-    if (pendingLocalThreadRef.current === threadId) return;
+    const step =
+      asString(body.event) || asString(body.step) || asString(body.type);
+    if (step) setThinkingStep(THINKING_STEP_LABELS[step] || step);
 
-    const controller = new AbortController();
-    const activeThreadId = threadId;
-
-    async function loadThread() {
-      try {
-        const response = await fetch(
-          `${apiUrl}/threads/${encodeURIComponent(activeThreadId)}`,
-          { signal: controller.signal },
-        );
-        if (response.status === 404) {
-          setMessages([]);
-          return;
-        }
-        if (!response.ok) {
-          throw new Error(
-            `Unable to load conversation thread (${response.status}).`,
-          );
-        }
-        const body = await response.json();
-        const loadedMessages = Array.isArray(body?.values?.messages)
-          ? body.values.messages
-          : [];
-        setMessages(loadedMessages);
-        setError(undefined);
-      } catch (err) {
-        if ((err as Error).name !== "AbortError") {
-          setError(
-            err instanceof Error
-              ? err
-              : new Error("Unable to load the conversation thread."),
-          );
-        }
-      }
+    if (Array.isArray(body.sources)) {
+      pendingSourcesRef.current = body.sources as Source[];
     }
+    if (body.debug && typeof body.debug === "object") {
+      pendingDebugRef.current = body.debug as DebugPayload;
+    }
+    if (Array.isArray(body.follow_up_questions)) {
+      setCustomFollowUps(
+        body.follow_up_questions.filter(
+          (q): q is string => typeof q === "string",
+        ),
+      );
+    }
+  }, []);
 
-    void loadThread();
-    return () => controller.abort();
-  }, [apiUrl, threadId]);
-
-  const submit = useCallback(
-    async (input?: StreamSubmitInput, options?: StreamSubmitOptions) => {
-      if (isLoading) return;
-
-      const explicitMessages = normalizeMessages(input?.messages);
-      const previousHumanMessage = lastHumanMessage(messages);
-      const submittedMessages =
-        explicitMessages.length > 0
-          ? explicitMessages
-          : previousHumanMessage
-            ? [previousHumanMessage]
-            : [];
-      const humanMessage = lastHumanMessage(submittedMessages);
-      const messageText = humanMessage
-        ? getContentString(humanMessage.content).trim()
-        : "";
-
-      if (!messageText) return;
-
-      const sessionId = threadId || uuidv4();
-      if (!threadId) {
-        pendingLocalThreadRef.current = sessionId;
-        void setThreadId(sessionId);
-      }
-
-      const previousValues: StateType = { messages, ui: [] };
-      const optimisticMessages =
-        options?.optimisticValues?.(previousValues).messages ??
-        (explicitMessages.length > 0
-          ? [...messages, ...explicitMessages]
-          : withoutLastAssistantMessage(messages));
-
-      setMessages(optimisticMessages);
-      setError(undefined);
-      setIsLoading(true);
-      setFollowUpQuestions([]);
-      setThinkingStep("Preparing...");
-
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      // Reset streaming refs for this turn
-      const streamingMessageId = uuidv4();
-      streamingMessageIdRef.current = streamingMessageId;
-      setStreamingMessageId(streamingMessageId);
-      streamingMessageAddedRef.current = false;
-      pendingContentRef.current = null;
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
-
-      let accumulatedContent = "";
-
-      // RAF loop: runs at display refresh rate (~60fps), flushes whatever
-      // content has accumulated since the last frame. This runs in a real
-      // browser paint callback so React cannot batch it away.
-      function scheduleRaf() {
-        if (rafRef.current !== null) return; // already scheduled
-        rafRef.current = requestAnimationFrame(() => {
-          rafRef.current = null;
-          const content = pendingContentRef.current;
-          if (content === null) return;
-          pendingContentRef.current = null; // consume
-
-          const msgId = streamingMessageIdRef.current;
-          if (!msgId) return;
-
-          if (!streamingMessageAddedRef.current) {
-            streamingMessageAddedRef.current = true;
-            setMessages((current) => [
-              ...current,
-              { id: msgId, type: "ai", content },
-            ]);
-          } else {
-            setMessages((current) => {
-              const idx = current.findIndex((m) => m.id === msgId);
-              if (idx === -1) return current;
-              const updated = [...current];
-              updated[idx] = { ...updated[idx], content };
-              return updated;
-            });
-          }
-        });
-      }
-
-      try {
-        const response = await fetch(`${apiUrl}/chat/stream`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "text/event-stream",
-          },
-          body: JSON.stringify({
-            message: messageText,
-            session_id: sessionId,
-            metadata: { source: "agent-web-ui" },
-            ...settingsRequestFields(),
-          }),
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          let detail = `Backend request failed with status ${response.status}.`;
-          try {
-            const body = await response.json();
-            if (typeof body?.detail === "string") detail = body.detail;
-            if (typeof body?.error === "string") detail = body.error;
-          } catch {
-            // keep status-based message
-          }
-          if (response.status === 429) detail = friendlyError("429");
-          throw new Error(friendlyError(detail));
-        }
-
-        const result = await readParentAgentStream(response, {
-          onToken: (token) => {
-            accumulatedContent += token;
-            // Write latest content into the ref and schedule a RAF flush.
-            // Multiple tokens arriving before the next frame are naturally
-            // batched — one render per frame (~16ms) instead of one per token.
-            pendingContentRef.current = accumulatedContent;
-            scheduleRaf();
-          },
-          onThinkingStep: (step) => {
-            setThinkingStep(step);
-          },
-        });
-
-        // Cancel any pending RAF — we're about to do a final synchronous update
-        if (rafRef.current !== null) {
-          cancelAnimationFrame(rafRef.current);
-          rafRef.current = null;
-        }
-
-        const finalContent =
-          result.answer ||
-          accumulatedContent ||
-          "I could not find enough information to answer that request.";
-
-        setLastDonePayload(result.rawPayload ?? null);
-
-        const msgId = streamingMessageIdRef.current;
-        if (msgId) {
-          if (streamingMessageAddedRef.current) {
-            setMessages((current) => {
-              const idx = current.findIndex((m) => m.id === msgId);
-              if (idx === -1) return current;
-              const updated = [...current];
-              updated[idx] = { ...updated[idx], content: finalContent };
-              return updated;
-            });
-          } else {
-            setMessages((current) => [
-              ...current,
-              { id: msgId, type: "ai", content: finalContent },
-            ]);
-          }
-        }
-
-        if (result.sources?.length) {
-          setSourcesMap((prev) => ({
-            ...prev,
-            [streamingMessageId]: result.sources!,
-          }));
-        }
-        if (result.debug) {
-          setDebugMap((prev) => ({
-            ...prev,
-            [streamingMessageId]: result.debug!,
-          }));
-        }
-        if (result.followUpQuestions?.length) {
-          setFollowUpQuestions(result.followUpQuestions);
-        }
-
-        pendingLocalThreadRef.current = null;
-        void refreshThreads().catch(console.error);
-      } catch (err) {
-        if ((err as Error).name !== "AbortError") {
-          const nextError =
-            err instanceof Error
-              ? err
-              : new Error("Unable to reach the backend.");
-          setError(nextError);
-        }
-      } finally {
-        abortRef.current = null;
-        streamingMessageIdRef.current = null;
-        pendingContentRef.current = null;
-        setStreamingMessageId(null);
-        setIsLoading(false);
-        setThinkingStep("");
-      }
+  const stream = useStream<StateType>({
+    apiUrl,
+    assistantId,
+    threadId: threadId ?? null,
+    messagesKey: "messages",
+    // Required so the spread of `stream` below can read `history` without
+    // throwing — newer SDK versions default this to `false`. It also enables
+    // loading prior messages when an existing thread is opened.
+    fetchStateHistory: true,
+    onThreadId: (id) => {
+      void setThreadId(id);
     },
-    [apiUrl, isLoading, messages, refreshThreads, setThreadId, threadId],
+    onCreated: (run) => {
+      runIdRef.current = run.run_id;
+    },
+    onMetadataEvent: (data) => {
+      const id = (data as { run_id?: string })?.run_id;
+      if (id) runIdRef.current = id;
+    },
+    onCustomEvent: (data) => harvestCustomEvent(data),
+    onError: (err) => {
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === "string"
+            ? err
+            : "Unable to reach the backend.";
+      setErrorOverride(new Error(friendlyError(message)));
+    },
+    onFinish: (state) => {
+      const messages = (state?.values?.messages ?? []) as Message[];
+      const aiId = lastAiMessageId(messages);
+
+      const sources =
+        pendingSourcesRef.current ??
+        (Array.isArray(state?.values?.sources)
+          ? (state.values.sources as Source[])
+          : null);
+      const debug =
+        pendingDebugRef.current ??
+        (state?.values?.debug && typeof state.values.debug === "object"
+          ? (state.values.debug as DebugPayload)
+          : null);
+
+      if (aiId && sources?.length) {
+        setSourcesMap((prev) => ({ ...prev, [aiId]: sources }));
+      }
+      if (aiId && debug) {
+        setDebugMap((prev) => ({ ...prev, [aiId]: debug }));
+      }
+
+      setLastDonePayload({
+        run_id: runIdRef.current,
+        ...(sources ? { sources } : {}),
+        ...(debug ? { debug } : {}),
+      });
+      setThinkingStep("");
+      void refreshThreads().catch(console.error);
+    },
+  });
+
+  // Wrap submit so each new turn starts from a clean best-effort state.
+  const submit = useCallback<typeof stream.submit>(
+    (values, options) => {
+      resetTurnState();
+      return stream.submit(values, options);
+    },
+    [stream, resetTurnState],
   );
 
-  const getMessagesMetadata = useCallback(
-    (_message: Message) => ({
-      firstSeenState: {
-        values,
-        parent_checkpoint: null,
-      },
-      branch: undefined,
-      branchOptions: undefined,
-    }),
-    [values],
+  // Follow-ups: prefer what the graph streamed this turn, else read from state.
+  const followUpQuestions = useMemo<string[]>(() => {
+    if (customFollowUps.length) return customFollowUps;
+    const fromState = stream.values?.follow_up_questions;
+    return Array.isArray(fromState)
+      ? fromState.filter((q): q is string => typeof q === "string")
+      : [];
+  }, [customFollowUps, stream.values]);
+
+  // The last AI message is the one actively streaming while a run is in flight.
+  const streamingMessageId = useMemo<string | null>(
+    () => (stream.isLoading ? lastAiMessageId(stream.messages) : null),
+    [stream.isLoading, stream.messages],
   );
+
+  const error = errorOverride ?? (stream.error as Error | undefined);
 
   const streamValue = useMemo<StreamContextType>(
     () => ({
-      messages,
-      values,
-      isLoading,
-      error,
-      interrupt: undefined,
+      ...stream,
       submit,
-      stop,
-      setBranch: () => undefined,
-      getMessagesMetadata,
+      error,
       sourcesMap,
       debugMap,
       followUpQuestions,
@@ -627,19 +302,15 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       streamingMessageId,
     }),
     [
-      debugMap,
-      error,
-      followUpQuestions,
-      getMessagesMetadata,
-      isLoading,
-      lastDonePayload,
-      messages,
-      sourcesMap,
-      stop,
-      streamingMessageId,
+      stream,
       submit,
+      error,
+      sourcesMap,
+      debugMap,
+      followUpQuestions,
       thinkingStep,
-      values,
+      lastDonePayload,
+      streamingMessageId,
     ],
   );
 

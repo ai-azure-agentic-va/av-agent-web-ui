@@ -33,7 +33,7 @@ function CustomComponent({
   const artifact = useArtifact();
   const { values } = useStreamContext();
   const customComponents = values.ui?.filter(
-    (ui) => ui.metadata?.message_id === message.id
+    (ui) => ui.metadata?.message_id === message.id,
   );
 
   if (!customComponents?.length) return null;
@@ -52,7 +52,7 @@ function CustomComponent({
 }
 
 function parseAnthropicStreamedToolCalls(
-  content: MessageContentComplex[]
+  content: MessageContentComplex[],
 ): AIMessage["tool_calls"] {
   const toolCallContents = content.filter((c) => c.type === "tool_use" && c.id);
 
@@ -118,18 +118,24 @@ export function AssistantMessage({
   const content = message?.content ?? [];
   // Strip the "Want to explore further?" section — it renders as chips below.
   const contentString = stripFollowUpSection(getContentString(content));
-  const [hideToolCalls] = useQueryState(
+  const [hideToolCallsToggle] = useQueryState(
     "hideToolCalls",
-    parseAsBoolean.withDefault(false)
+    parseAsBoolean.withDefault(false),
   );
+  // Tool calls are an internal/debug surface. When NEXT_PUBLIC_HIDE_TOOL_CALLS
+  // is set (e.g. in production) they are force-hidden; otherwise the composer
+  // switch toggles them.
+  const hideToolCalls =
+    process.env.NEXT_PUBLIC_HIDE_TOOL_CALLS === "true" || hideToolCallsToggle;
 
   const thread = useStreamContext();
   const streamingMessageId = thread.streamingMessageId as string | null;
-  const isStreaming = !!streamingMessageId && streamingMessageId === message?.id;
+  const isStreaming =
+    !!streamingMessageId && streamingMessageId === message?.id;
   const isLastMessage =
     thread.messages[thread.messages.length - 1].id === message?.id;
   const hasNoAIOrToolMessages = !thread.messages.find(
-    (m) => m.type === "ai" || m.type === "tool"
+    (m) => m.type === "ai" || m.type === "tool",
   );
   const meta = message ? thread.getMessagesMetadata(message) : undefined;
   const threadInterrupt = thread.interrupt;
@@ -147,7 +153,7 @@ export function AssistantMessage({
   const toolCallsHaveContents =
     hasToolCalls &&
     message.tool_calls?.some(
-      (tc) => tc.args && Object.keys(tc.args).length > 0
+      (tc) => tc.args && Object.keys(tc.args).length > 0,
     );
   const hasAnthropicToolCalls = !!anthropicStreamedToolCalls?.length;
   const isToolResult = message?.type === "tool";
@@ -157,15 +163,37 @@ export function AssistantMessage({
 
   // The run_id for feedback comes from the `done` SSE event payload,
   // stored on lastDonePayload by Stream.tsx
-  const lastDonePayload = thread.lastDonePayload as Record<string, unknown> | null;
+  const lastDonePayload = thread.lastDonePayload as Record<
+    string,
+    unknown
+  > | null;
   const runId =
     isLastMessage && !isLoading && lastDonePayload
-      ? (lastDonePayload.run_id as string | null) ?? null
+      ? ((lastDonePayload.run_id as string | null) ?? null)
       : null;
 
-  const apiUrl = (process.env.NEXT_PUBLIC_API_URL ?? "/api").replace(/\/$/, "");
-
   if (isToolResult && hideToolCalls) {
+    return null;
+  }
+
+  // An AI message that only carries tool calls has no visible body when tool
+  // calls are hidden. Skip it entirely (avatar included) so it doesn't render
+  // as a lone empty AI icon. Keep it if anything else would render here.
+  const customComponents = thread.values.ui?.filter(
+    (ui) => ui.metadata?.message_id === message?.id,
+  );
+  const interruptVisible =
+    !!threadInterrupt && (isLastMessage || hasNoAIOrToolMessages);
+  if (
+    !isToolResult &&
+    hideToolCalls &&
+    contentString.length === 0 &&
+    (hasToolCalls || hasAnthropicToolCalls) &&
+    !(sources && sources.length > 0) &&
+    !debug &&
+    !interruptVisible &&
+    !customComponents?.length
+  ) {
     return null;
   }
 
@@ -173,12 +201,17 @@ export function AssistantMessage({
     <div className="message-animate group flex w-full items-start gap-3">
       {/* Avatar */}
       {!isToolResult && (
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <div className="bg-primary/10 text-primary flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
           <Bot className="h-4 w-4" />
         </div>
       )}
 
-      <div className={cn("flex min-w-0 flex-1 flex-col gap-3", isToolResult && "ml-11")}>
+      <div
+        className={cn(
+          "flex min-w-0 flex-1 flex-col gap-3",
+          isToolResult && "ml-11",
+        )}
+      >
         {isToolResult ? (
           <>
             <ToolResult message={message} />
@@ -222,7 +255,12 @@ export function AssistantMessage({
 
             {debug && <DebugSection debug={debug} />}
 
-            {message && <CustomComponent message={message} thread={thread} />}
+            {message && (
+              <CustomComponent
+                message={message}
+                thread={thread}
+              />
+            )}
 
             <Interrupt
               interrupt={threadInterrupt}
@@ -234,7 +272,7 @@ export function AssistantMessage({
             <div
               className={cn(
                 "flex items-center gap-2 transition-opacity",
-                "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+                "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
               )}
             >
               <BranchSwitcher
@@ -244,7 +282,7 @@ export function AssistantMessage({
                 isLoading={isLoading}
               />
               {/* Feedback thumbs sit left of copy/refresh */}
-              <MessageFeedback runId={runId} apiUrl={apiUrl} />
+              <MessageFeedback runId={runId} />
               <CommandBar
                 content={contentString}
                 isLoading={isLoading}
@@ -259,20 +297,26 @@ export function AssistantMessage({
   );
 }
 
-export function AssistantMessageLoading({ thinkingStep }: { thinkingStep?: string }) {
+export function AssistantMessageLoading({
+  thinkingStep,
+}: {
+  thinkingStep?: string;
+}) {
   return (
     <div className="message-animate flex items-start gap-3">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+      <div className="bg-primary/10 text-primary flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
         <Bot className="h-4 w-4" />
       </div>
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5 rounded-2xl bg-muted px-4 py-3">
-          <div className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:-0.3s]" />
-          <div className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:-0.15s]" />
-          <div className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/40" />
+        <div className="bg-muted flex items-center gap-1.5 rounded-2xl px-4 py-3">
+          <div className="bg-muted-foreground/40 h-2 w-2 animate-bounce rounded-full [animation-delay:-0.3s]" />
+          <div className="bg-muted-foreground/40 h-2 w-2 animate-bounce rounded-full [animation-delay:-0.15s]" />
+          <div className="bg-muted-foreground/40 h-2 w-2 animate-bounce rounded-full" />
         </div>
         {thinkingStep && (
-          <p className="ml-1 text-xs italic text-muted-foreground">{thinkingStep}</p>
+          <p className="text-muted-foreground ml-1 text-xs italic">
+            {thinkingStep}
+          </p>
         )}
       </div>
     </div>
@@ -281,11 +325,11 @@ export function AssistantMessageLoading({ thinkingStep }: { thinkingStep?: strin
 
 export function ThinkingIndicator() {
   return (
-    <div className="message-animate ml-11 flex items-center gap-2 text-muted-foreground">
+    <div className="message-animate text-muted-foreground ml-11 flex items-center gap-2">
       <div className="flex items-center gap-1">
-        <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary/60" />
-        <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary/60 [animation-delay:0.2s]" />
-        <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary/60 [animation-delay:0.4s]" />
+        <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full" />
+        <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full [animation-delay:0.2s]" />
+        <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full [animation-delay:0.4s]" />
       </div>
       <span className="text-sm italic">Thinking...</span>
     </div>

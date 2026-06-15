@@ -1,6 +1,30 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { verifySession, SESSION_COOKIE } from "@/lib/msal-auth";
 
 export const runtime = "nodejs";
+
+const BACKEND_DEV_BEARER_TOKEN =
+  process.env.PARENT_AGENT_DEV_TOKEN ??
+  process.env.BACKEND_DEV_BEARER_TOKEN ??
+  "";
+
+const BACKEND_DEV_GROUP_IDS = process.env.BACKEND_DEV_GROUP_IDS ?? "";
+
+// Mirrors the catch-all proxy in src/app/api/[..._path]/route.ts so the
+// server-to-server call to the backend carries the user's bearer token.
+async function getAccessToken(): Promise<string | null> {
+  if (process.env.DISABLE_AUTH === "true") {
+    return BACKEND_DEV_BEARER_TOKEN || "local-mock-token";
+  }
+  const cookieStore = await cookies();
+  const raw = cookieStore.get(SESSION_COOKIE)?.value;
+  if (!raw) return null;
+  const session = verifySession(raw);
+  if (!session?.accessToken) return null;
+  if (session.expiresAt && Date.now() > Number(session.expiresAt)) return null;
+  return session.accessToken;
+}
 
 // Shown when no backend is reachable and DEFAULT_STARTER_PROMPTS is not set.
 const FALLBACK_PROMPTS = [
@@ -34,7 +58,15 @@ export async function GET() {
 
   if (backendUrl) {
     try {
+      const accessToken = await getAccessToken();
+      const headers: Record<string, string> = {};
+      if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+      if (process.env.DISABLE_AUTH === "true" && BACKEND_DEV_GROUP_IDS) {
+        headers["x-dev-groups"] = BACKEND_DEV_GROUP_IDS;
+      }
+
       const res = await fetch(`${backendUrl}/starter-prompts`, {
+        headers,
         signal: AbortSignal.timeout(3000),
       });
       if (res.ok) {

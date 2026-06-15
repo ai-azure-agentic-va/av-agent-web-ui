@@ -1,10 +1,11 @@
 import { useQueryState } from "nuqs";
-import { type Message } from "@langchain/langgraph-sdk";
+import { Client, type Message } from "@langchain/langgraph-sdk";
 import {
   createContext,
   useContext,
   ReactNode,
   useCallback,
+  useMemo,
   useState,
   Dispatch,
   SetStateAction,
@@ -55,28 +56,23 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const [threads, setThreads] = useState<ConversationThread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
 
+  // Hit the standard LangGraph contract (POST /threads/search) through the SDK
+  // client, which routes via the Next.js /api proxy to the backend.
+  const client = useMemo(() => new Client({ apiUrl }), [apiUrl]);
+
   const getThreads = useCallback(async (): Promise<ConversationThread[]> => {
     try {
-      const response = await fetch(`${apiUrl}/threads/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ limit: 100 }),
+      const threads = await client.threads.search({
+        limit: 100,
+        sortBy: "updated_at",
+        sortOrder: "desc",
       });
-      // FastAPI backend uses a different thread endpoint — silently return
-      // empty list if this LangGraph-style endpoint doesn't exist.
-      if (response.status === 404 || response.status === 405) {
-        return [];
-      }
-      if (!response.ok) {
-        console.warn(`Thread history unavailable (${response.status})`);
-        return [];
-      }
-      return response.json();
+      return threads as ConversationThread[];
     } catch {
-      // Network error (backend not reachable for this endpoint) — non-fatal
+      // Backend not reachable / endpoint unavailable — non-fatal, render empty.
       return [];
     }
-  }, [apiUrl]);
+  }, [client]);
 
   const refreshThreads = useCallback(async () => {
     setThreadsLoading(true);
