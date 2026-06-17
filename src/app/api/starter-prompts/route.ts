@@ -11,6 +11,11 @@ const BACKEND_DEV_BEARER_TOKEN =
 
 const BACKEND_DEV_GROUP_IDS = process.env.BACKEND_DEV_GROUP_IDS ?? "";
 
+// Starter prompts are group-scoped and owned by the backend's
+// TENANT_GROUP_STARTER_PROMPTS_MAPPING. There is no hardcoded fallback set:
+// when the backend is unreachable (and DEFAULT_STARTER_PROMPTS is unset) we
+// return an empty list so callers simply see no starter chips.
+
 // Mirrors the catch-all proxy in src/app/api/[..._path]/route.ts so the
 // server-to-server call to the backend carries the user's bearer token.
 async function getAccessToken(): Promise<string | null> {
@@ -25,27 +30,6 @@ async function getAccessToken(): Promise<string | null> {
   if (session.expiresAt && Date.now() > Number(session.expiresAt)) return null;
   return session.accessToken;
 }
-
-// Shown when no backend is reachable and DEFAULT_STARTER_PROMPTS is not set.
-const FALLBACK_PROMPTS = [
-  {
-    label: "STTM Mapping",
-    message: "Provide me the RAW, INT and CUR paths for dataset ACAPS.",
-  },
-  {
-    label: "Owner & Data Steward",
-    message: "Who is the data owner and the data steward for dataset IMPACS?",
-  },
-  {
-    label: "Pipeline Information",
-    message:
-      "Give me all the information for pipeline pl-56-00-mdn-dds-daily-ingest_data.",
-  },
-  {
-    label: "ACAPS STTM Location",
-    message: "Provide me all the STTM locations for ACAPS.",
-  },
-];
 
 export async function GET() {
   // 1. Try the real backend first (3 s timeout so it fails fast when offline)
@@ -93,6 +77,6 @@ export async function GET() {
     }
   }
 
-  // 3. Return hardcoded defaults
-  return NextResponse.json({ prompts: FALLBACK_PROMPTS });
+  // 3. No backend prompts and no env override — return an empty list (no fallback).
+  return NextResponse.json({ prompts: [] });
 }
