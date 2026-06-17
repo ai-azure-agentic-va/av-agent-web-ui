@@ -73,7 +73,7 @@ az acr build \
   --registry "${ACR_NAME}" \
   --image "${APP_NAME}:${IMAGE_TAG}" \
   --build-arg NEXT_PUBLIC_API_URL=/api \
-  --build-arg NEXT_PUBLIC_ASSISTANT_ID=agent \
+  --build-arg NEXT_PUBLIC_ASSISTANT_ID=chat \
   "${REPO_ROOT}"
 
 # ---------------------------------------------------------------------------

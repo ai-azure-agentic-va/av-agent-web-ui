@@ -17,7 +17,7 @@ services:
         # /api means the browser talks to this Next.js server, which proxies
         # all /api/* requests to PARENT_AGENT_API_URL server-side.
         NEXT_PUBLIC_API_URL: /api
-        NEXT_PUBLIC_ASSISTANT_ID: agent
+        NEXT_PUBLIC_ASSISTANT_ID: chat
     ports:
       - "3000:3000"
     env_file:
