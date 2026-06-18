@@ -27,13 +27,12 @@ import {
 import { ETSLogo } from "../icons/ets-logo";
 import {
   ArrowDown,
-  LoaderCircle,
+  ArrowUp,
   PanelLeftClose,
   PanelLeft,
   Settings,
   SquarePen,
   XIcon,
-  Send,
   LogOut,
 } from "lucide-react";
 import { SettingsPanel } from "./settings-panel";
@@ -124,7 +123,6 @@ function ChatInput({
   input,
   setInput,
   handleSubmit,
-  isLoading,
   stream,
   hideToolCalls,
   setHideToolCalls,
@@ -164,24 +162,50 @@ function ChatInput({
           />
           <div className="flex items-center gap-1 pb-1">
             {stream.isLoading ? (
-              <Button
+              <button
                 type="button"
-                size="icon"
-                variant="ghost"
-                className="h-9 w-9"
                 onClick={() => stream.stop()}
+                aria-label="Stop generating"
+                title="Stop generating"
+                className={cn(
+                  "group relative flex h-9 w-9 items-center justify-center rounded-lg",
+                  "bg-[#E6EDF5] transition-colors",
+                  "hover:bg-[#0F3D70]",
+                )}
               >
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-              </Button>
+                <span
+                  aria-hidden="true"
+                  className="flex h-4 items-center gap-[2.5px] transition-opacity group-hover:opacity-0"
+                >
+                  <span className="wave-bar" />
+                  <span className="wave-bar" />
+                  <span className="wave-bar" />
+                  <span className="wave-bar" />
+                </span>
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "absolute inset-0 flex items-center justify-center",
+                    "opacity-0 transition-opacity group-hover:opacity-100",
+                  )}
+                >
+                  <span className="h-2.5 w-2.5 rounded-[2px] bg-white" />
+                </span>
+              </button>
             ) : (
-              <Button
+              <button
                 type="submit"
-                size="icon"
-                className="h-9 w-9"
-                disabled={isLoading || sessionExpired || !input.trim()}
+                disabled={!input.trim()}
+                aria-label="Send message"
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-lg",
+                  "bg-[#0F3D70] text-white transition-colors",
+                  "hover:bg-[#0F3D70]/90",
+                  "disabled:cursor-not-allowed disabled:opacity-50",
+                )}
               >
-                <Send className="h-4 w-4" />
-              </Button>
+                <ArrowUp className="h-4 w-4" />
+              </button>
             )}
           </div>
         </div>
