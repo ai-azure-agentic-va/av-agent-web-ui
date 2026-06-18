@@ -45,7 +45,15 @@ const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
 const DEFAULT_API_URL = "/api";
 
 function normalizeApiUrl(value: string | undefined | null): string {
-  return (value || DEFAULT_API_URL).replace(/\/$/, "");
+  const raw = (value || DEFAULT_API_URL).replace(/\/$/, "");
+  // The LangGraph SDK builds request URLs with `new URL()`, which requires an
+  // ABSOLUTE URL. A relative value like "/api" (the same-origin Next.js proxy)
+  // must be resolved against the current origin at runtime: at build time we
+  // don't know the deployed host, and both UI apps share one baked image.
+  if (raw.startsWith("/") && typeof window !== "undefined") {
+    return `${window.location.origin}${raw}`;
+  }
+  return raw;
 }
 
 export function ThreadProvider({ children }: { children: ReactNode }) {
