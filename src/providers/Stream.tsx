@@ -164,6 +164,10 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const pendingSourcesRef = useRef<Source[] | null>(null);
   const pendingDebugRef = useRef<DebugPayload | null>(null);
   const runIdRef = useRef<string | null>(null);
+  // Set once `sources_final` arrives, so the finish handler treats the pending
+  // sources as an authoritative replacement (an empty list clears the panel)
+  // rather than falling back to the accumulated / state sources.
+  const sourcesFinalRef = useRef<boolean>(false);
 
   const resetTurnState = useCallback(() => {
     setCustomFollowUps([]);
@@ -172,6 +176,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     pendingSourcesRef.current = null;
     pendingDebugRef.current = null;
     runIdRef.current = null;
+    sourcesFinalRef.current = false;
   }, []);
 
   const harvestCustomEvent = useCallback((data: unknown) => {
@@ -185,10 +190,38 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
     const step =
       asString(body.event) || asString(body.step) || asString(body.type);
+
+    // `sources_final` is the authoritative replacement emitted after the agent
+    // finishes: it holds ONLY the inline-cited sources. Per the replace
+    // contract, swap out the incrementally accumulated `search_complete` set
+    // for this list verbatim — including an empty list, which clears the panel.
+    // It is not a thinking step, so don't surface it as a status label.
+    if (step === "sources_final") {
+      if (Array.isArray(body.sources)) {
+        pendingSourcesRef.current = (body.sources as Source[])
+          .slice()
+          .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+        sourcesFinalRef.current = true;
+      }
+      return;
+    }
+
     if (step) setThinkingStep(THINKING_STEP_LABELS[step] || step);
 
     if (Array.isArray(body.sources)) {
-      pendingSourcesRef.current = body.sources as Source[];
+      // Accumulate across events by merging on the backend-guaranteed `index`,
+      // so a later (e.g. retry/refine) event that carries a partial list updates
+      // matching entries in place instead of clobbering earlier sources.
+      const byIndex = new Map<number, Source>();
+      for (const s of pendingSourcesRef.current ?? []) {
+        if (typeof s.index === "number") byIndex.set(s.index, s);
+      }
+      for (const s of body.sources as Source[]) {
+        if (typeof s.index === "number") byIndex.set(s.index, s);
+      }
+      pendingSourcesRef.current = [...byIndex.values()].sort(
+        (a, b) => (a.index ?? 0) - (b.index ?? 0),
+      );
     }
     if (body.debug && typeof body.debug === "object") {
       pendingDebugRef.current = body.debug as DebugPayload;
@@ -235,11 +268,15 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       const messages = (state?.values?.messages ?? []) as Message[];
       const aiId = lastAiMessageId(messages);
 
-      const sources =
-        pendingSourcesRef.current ??
-        (Array.isArray(state?.values?.sources)
-          ? (state.values.sources as Source[])
-          : null);
+      // When `sources_final` arrived it is authoritative: use the pending list
+      // verbatim (an empty list means the answer cited nothing → no panel).
+      // Otherwise fall back to whatever accumulated, then to graph state.
+      const sources = sourcesFinalRef.current
+        ? pendingSourcesRef.current
+        : (pendingSourcesRef.current ??
+          (Array.isArray(state?.values?.sources)
+            ? (state.values.sources as Source[])
+            : null));
       const debug =
         pendingDebugRef.current ??
         (state?.values?.debug && typeof state.values.debug === "object"

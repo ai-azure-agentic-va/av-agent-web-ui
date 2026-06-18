@@ -62,7 +62,10 @@ export function linkifyCitations(
     if (s.url) urlByIndex.set(idx, s.url);
   });
   if (urlByIndex.size === 0) return content;
-  return content.replace(/\[(\d{1,2})\]/g, (match, num) => {
+  // Match any marker number; an `[n]` with no matching source is left as plain
+  // text rather than dropped, so accumulated indices beyond the small range and
+  // any model/backend mismatch degrade gracefully.
+  return content.replace(/\[(\d{1,3})\]/g, (match, num) => {
     const url = urlByIndex.get(Number(num));
     // Escaped inner brackets so the link text renders as literal "[n]".
     return url ? `[\\[${num}\\]](${url})` : match;
@@ -87,5 +90,8 @@ export function stripFollowUpSection(content: string): string {
     end += 1;
   }
   const kept = [...lines.slice(0, start), ...lines.slice(end)];
-  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return kept
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
