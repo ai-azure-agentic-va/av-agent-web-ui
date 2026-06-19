@@ -266,19 +266,17 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     },
     onCustomEvent: (data) => harvestCustomEvent(data),
     onError: (err) => {
+      const raw = err instanceof Error ? err.message : String(err ?? "");
+      if (raw.includes("401") || (err as any)?.status === 401) {
+        setSessionExpired(true);
+        return;
+      }
       const message =
         err instanceof Error
           ? err.message
           : typeof err === "string"
             ? err
             : "Unable to reach the backend.";
-      if (
-        message.includes("401") ||
-        message.toLowerCase().includes("session expired") ||
-        message.toLowerCase().includes("unauthorized")
-      ) {
-        setSessionExpired(true);
-      }
       setErrorOverride(new Error(friendlyError(message)));
     },
     onFinish: (state) => {
