@@ -37,7 +37,6 @@ import {
   LogOut,
 } from "lucide-react";
 import { SettingsPanel } from "./settings-panel";
-import { SessionExpiredOverlay } from "./session-expired-overlay";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import ThreadHistory from "./history";
@@ -117,7 +116,6 @@ type ChatInputProps = {
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
   placeholder?: string;
   onSettingsClick?: () => void;
-  sessionExpired?: boolean;
 };
 
 function ChatInput({
@@ -131,7 +129,6 @@ function ChatInput({
   textareaRef,
   placeholder = "Message Enterprise Technology Services...",
   onSettingsClick,
-  sessionExpired = false,
 }: ChatInputProps) {
   return (
     <div className="border-border bg-card relative rounded-2xl border shadow-sm">
@@ -159,8 +156,7 @@ function ChatInput({
             }}
             placeholder={placeholder}
             rows={1}
-            disabled={sessionExpired}
-            className="placeholder:text-muted-foreground/50 field-sizing-content max-h-[200px] min-h-[44px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm focus:ring-0 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            className="placeholder:text-muted-foreground/50 field-sizing-content max-h-[200px] min-h-[44px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm focus:ring-0 focus:outline-none"
           />
           <div className="flex items-center gap-1 pb-1">
             {stream.isLoading ? (
@@ -178,7 +174,7 @@ function ChatInput({
                 type="submit"
                 size="icon"
                 className="h-9 w-9"
-                disabled={isLoading || sessionExpired || !input.trim()}
+                disabled={isLoading || !input.trim()}
               >
                 <Send className="h-4 w-4" />
               </Button>
@@ -255,7 +251,6 @@ export function Thread() {
   const stream = useStreamContext();
   const messages = stream.messages;
   const isLoading = stream.isLoading;
-  const sessionExpired = stream.sessionExpired as boolean;
 
   const lastError = useRef<string | undefined>(undefined);
 
@@ -318,7 +313,7 @@ export function Thread() {
   const handleSubmit = (e: FormEvent | null, overrideText?: string) => {
     e?.preventDefault();
     const text = (overrideText ?? input).trim();
-    if (text.length === 0 || isLoading || sessionExpired) return;
+    if (text.length === 0 || isLoading) return;
     setFirstTokenReceived(false);
 
     const newHumanMessage: Message = {
@@ -357,7 +352,7 @@ export function Thread() {
   };
 
   const handleStarterPrompt = (message: string) => {
-    if (isLoading || sessionExpired) return;
+    if (isLoading) return;
     setFirstTokenReceived(false);
     const newHumanMessage: Message = {
       id: uuidv4(),
@@ -385,7 +380,6 @@ export function Thread() {
   const handleRegenerate = (
     parentCheckpoint: Checkpoint | null | undefined,
   ) => {
-    if (isLoading || sessionExpired) return;
     prevMessageLength.current = prevMessageLength.current - 1;
     setFirstTokenReceived(false);
     stream.submit(undefined, {
@@ -550,11 +544,6 @@ export function Thread() {
 
                       {/* Search Box */}
                       <div className="w-full max-w-2xl text-left">
-                        {sessionExpired && (
-                          <div className="mb-3">
-                            <SessionExpiredOverlay />
-                          </div>
-                        )}
                         <ChatInput
                           input={input}
                           setInput={setInput}
@@ -566,7 +555,6 @@ export function Thread() {
                           textareaRef={chatInputRef}
                           placeholder="How can I support you today?"
                           onSettingsClick={() => setSettingsOpen(true)}
-                          sessionExpired={sessionExpired}
                         />
                       </div>
 
@@ -627,7 +615,7 @@ export function Thread() {
                           >
                             <AssistantMessage
                               message={message}
-                              isLoading={isLoading || sessionExpired}
+                              isLoading={isLoading}
                               handleRegenerate={handleRegenerate}
                             />
                             {(() => {
@@ -651,8 +639,7 @@ export function Thread() {
                                       <button
                                         key={i}
                                         onClick={() => handleFollowUpClick(q)}
-                                        disabled={sessionExpired}
-                                        className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-foreground transition-colors hover:border-primary/30 hover:bg-primary/10 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="border-border bg-card text-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary rounded-full border px-3 py-1.5 text-xs transition-colors"
                                       >
                                         {q}
                                       </button>
@@ -669,7 +656,7 @@ export function Thread() {
                     <AssistantMessage
                       key="interrupt-msg"
                       message={undefined}
-                      isLoading={isLoading || sessionExpired}
+                      isLoading={isLoading}
                       handleRegenerate={handleRegenerate}
                     />
                   )}
@@ -708,11 +695,6 @@ export function Thread() {
           {chatStarted && (
             <div className="border-border bg-background border-t px-4 py-4">
               <div className="mx-auto max-w-3xl">
-                {sessionExpired && (
-                  <div className="mb-3">
-                    <SessionExpiredOverlay />
-                  </div>
-                )}
                 <ChatInput
                   input={input}
                   setInput={setInput}
@@ -724,7 +706,6 @@ export function Thread() {
                   textareaRef={chatInputRef}
                   placeholder="How can I support you today?"
                   onSettingsClick={() => setSettingsOpen(true)}
-                  sessionExpired={sessionExpired}
                 />
               </div>
             </div>
