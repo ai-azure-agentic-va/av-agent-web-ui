@@ -189,6 +189,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     sourcesFinalRef.current = false;
   }, []);
 
+  const hasSubmittedRef = useRef(false);
+
   const harvestCustomEvent = useCallback((data: unknown) => {
     // A plain string is treated as a thinking-step label.
     if (typeof data === "string") {
@@ -267,7 +269,10 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     onCustomEvent: (data) => harvestCustomEvent(data),
     onError: (err) => {
       const raw = err instanceof Error ? err.message : String(err ?? "");
-      if (raw.includes("401") || (err as any)?.status === 401) {
+      if (
+        (raw.includes("401") || (err as any)?.status === 401) &&
+        hasSubmittedRef.current
+      ) {
         setSessionExpired(true);
         return;
       }
@@ -318,6 +323,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   // Wrap submit so each new turn starts from a clean best-effort state.
   const submit = useCallback<typeof stream.submit>(
     (values, options) => {
+      hasSubmittedRef.current = true;
       resetTurnState();
       return stream.submit(values, options);
     },
