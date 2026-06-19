@@ -269,10 +269,10 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     onCustomEvent: (data) => harvestCustomEvent(data),
     onError: (err) => {
       const raw = err instanceof Error ? err.message : String(err ?? "");
-      if (
-        (raw.includes("401") || (err as any)?.status === 401) &&
-        hasSubmittedRef.current
-      ) {
+      const is401 = raw.includes("401") || (err as any)?.status === 401;
+      const isSessionExpiry =
+        is401 && hasSubmittedRef.current && !raw.includes("Unauthorized:");
+      if (isSessionExpiry) {
         setSessionExpired(true);
         return;
       }
