@@ -93,6 +93,7 @@ type StreamContextType = ReturnType<typeof useStream<StateType>> & {
   thinkingStep: string;
   lastDonePayload: unknown;
   streamingMessageId: string | null;
+  sessionExpired: boolean;
 };
 
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
@@ -167,6 +168,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const [thinkingStep, setThinkingStep] = useState<string>("");
   const [lastDonePayload, setLastDonePayload] = useState<unknown>(null);
   const [errorOverride, setErrorOverride] = useState<Error | undefined>();
+  const [sessionExpired, setSessionExpired] = useState<boolean>(false);
 
   // Harvested during a run, committed to the keyed maps on finish.
   const pendingSourcesRef = useRef<Source[] | null>(null);
@@ -270,6 +272,13 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
           : typeof err === "string"
             ? err
             : "Unable to reach the backend.";
+      if (
+        message.includes("401") ||
+        message.toLowerCase().includes("session expired") ||
+        message.toLowerCase().includes("unauthorized")
+      ) {
+        setSessionExpired(true);
+      }
       setErrorOverride(new Error(friendlyError(message)));
     },
     onFinish: (state) => {
@@ -345,6 +354,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       thinkingStep,
       lastDonePayload,
       streamingMessageId,
+      sessionExpired,
     }),
     [
       stream,
@@ -356,6 +366,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       thinkingStep,
       lastDonePayload,
       streamingMessageId,
+      sessionExpired,
     ],
   );
 
