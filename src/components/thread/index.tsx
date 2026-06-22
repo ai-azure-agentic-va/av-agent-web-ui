@@ -28,16 +28,16 @@ import {
 import { ETSLogo } from "../icons/ets-logo";
 import {
   ArrowDown,
-  LoaderCircle,
+  ArrowUp,
   PanelLeftClose,
   PanelLeft,
   Settings,
   SquarePen,
   XIcon,
-  Send,
   LogOut,
 } from "lucide-react";
 import { SettingsPanel } from "./settings-panel";
+import { SessionExpiredOverlay } from "./session-expired-overlay";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import ThreadHistory from "./history";
@@ -112,19 +112,20 @@ type ChatInputProps = {
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
   placeholder?: string;
   onSettingsClick?: () => void;
+  sessionExpired?: boolean;
 };
 
 function ChatInput({
   input,
   setInput,
   handleSubmit,
-  isLoading,
   stream,
   hideToolCalls,
   setHideToolCalls,
   textareaRef,
   placeholder = "Message Enterprise Technology Services...",
   onSettingsClick,
+  sessionExpired = false,
 }: ChatInputProps) {
   return (
     <div className="border-border bg-card relative rounded-2xl border shadow-sm">
@@ -152,28 +153,55 @@ function ChatInput({
             }}
             placeholder={placeholder}
             rows={1}
-            className="placeholder:text-muted-foreground/50 field-sizing-content max-h-[200px] min-h-[44px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm focus:ring-0 focus:outline-none"
+            disabled={sessionExpired}
+            className="placeholder:text-muted-foreground/50 field-sizing-content max-h-[200px] min-h-[44px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm focus:ring-0 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
           />
           <div className="flex items-center gap-1 pb-1">
             {stream.isLoading ? (
-              <Button
+              <button
                 type="button"
-                size="icon"
-                variant="ghost"
-                className="h-9 w-9"
                 onClick={() => stream.stop()}
+                aria-label="Stop generating"
+                title="Stop generating"
+                className={cn(
+                  "group relative flex h-9 w-9 items-center justify-center rounded-lg",
+                  "bg-[#E6EDF5] transition-colors",
+                  "hover:bg-[#0F3D70]",
+                )}
               >
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-              </Button>
+                <span
+                  aria-hidden="true"
+                  className="flex h-4 items-center gap-[2.5px] transition-opacity group-hover:opacity-0"
+                >
+                  <span className="wave-bar" />
+                  <span className="wave-bar" />
+                  <span className="wave-bar" />
+                  <span className="wave-bar" />
+                </span>
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "absolute inset-0 flex items-center justify-center",
+                    "opacity-0 transition-opacity group-hover:opacity-100",
+                  )}
+                >
+                  <span className="h-2.5 w-2.5 rounded-[2px] bg-white" />
+                </span>
+              </button>
             ) : (
-              <Button
+              <button
                 type="submit"
-                size="icon"
-                className="h-9 w-9"
-                disabled={isLoading || !input.trim()}
+                disabled={!input.trim()}
+                aria-label="Send message"
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-lg",
+                  "bg-[#0F3D70] text-white transition-colors",
+                  "hover:bg-[#0F3D70]/90",
+                  "disabled:cursor-not-allowed disabled:opacity-50",
+                )}
               >
-                <Send className="h-4 w-4" />
-              </Button>
+                <ArrowUp className="h-4 w-4" />
+              </button>
             )}
           </div>
         </div>
@@ -226,12 +254,14 @@ function ChatInput({
 const AssistantTurn = memo(function AssistantTurn({
   message,
   isLoading,
+  sessionExpired,
   isStreamingLast,
   handleRegenerate,
   onFollowUpClick,
 }: {
   message: Message;
   isLoading: boolean;
+  sessionExpired: boolean;
   isStreamingLast: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
   onFollowUpClick: (question: string) => void;
@@ -250,7 +280,7 @@ const AssistantTurn = memo(function AssistantTurn({
     <>
       <AssistantMessage
         message={message}
-        isLoading={isLoading}
+        isLoading={isLoading || sessionExpired}
         handleRegenerate={handleRegenerate}
       />
       {followUps.length > 0 && (
@@ -263,7 +293,8 @@ const AssistantTurn = memo(function AssistantTurn({
               <button
                 key={i}
                 onClick={() => onFollowUpClick(q)}
-                className="border-border bg-card text-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary rounded-full border px-3 py-1.5 text-xs transition-colors"
+                disabled={sessionExpired}
+                className="border-border bg-card text-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary rounded-full border px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {q}
               </button>
@@ -304,6 +335,7 @@ export function Thread() {
   const stream = useStreamContext();
   const messages = stream.messages;
   const isLoading = stream.isLoading;
+  const sessionExpired = stream.sessionExpired as boolean;
 
   const lastError = useRef<string | undefined>(undefined);
 
@@ -365,7 +397,7 @@ export function Thread() {
   const handleSubmit = (e: FormEvent | null, overrideText?: string) => {
     e?.preventDefault();
     const text = (overrideText ?? input).trim();
-    if (text.length === 0 || isLoading) return;
+    if (text.length === 0 || isLoading || sessionExpired) return;
     setFirstTokenReceived(false);
 
     const newHumanMessage: Message = {
@@ -401,7 +433,7 @@ export function Thread() {
   };
 
   const handleStarterPrompt = (message: string) => {
-    if (isLoading) return;
+    if (isLoading || sessionExpired) return;
     setFirstTokenReceived(false);
     const newHumanMessage: Message = {
       id: uuidv4(),
@@ -429,6 +461,7 @@ export function Thread() {
   const handleRegenerate = (
     parentCheckpoint: Checkpoint | null | undefined,
   ) => {
+    if (isLoading || sessionExpired) return;
     prevMessageLength.current = prevMessageLength.current - 1;
     setFirstTokenReceived(false);
     stream.submit(undefined, {
@@ -589,6 +622,11 @@ export function Thread() {
 
                       {/* Search Box */}
                       <div className="w-full max-w-2xl text-left">
+                        {sessionExpired && (
+                          <div className="mb-3">
+                            <SessionExpiredOverlay />
+                          </div>
+                        )}
                         <ChatInput
                           input={input}
                           setInput={setInput}
@@ -600,6 +638,7 @@ export function Thread() {
                           textareaRef={chatInputRef}
                           placeholder="How can I support you today?"
                           onSettingsClick={() => setSettingsOpen(true)}
+                          sessionExpired={sessionExpired}
                         />
                       </div>
 
@@ -659,6 +698,7 @@ export function Thread() {
                             key={message.id || `${message.type}-${index}`}
                             message={message}
                             isLoading={isLoading}
+                            sessionExpired={sessionExpired}
                             isStreamingLast={
                               isLoading && index === messages.length - 1
                             }
@@ -672,7 +712,7 @@ export function Thread() {
                     <AssistantMessage
                       key="interrupt-msg"
                       message={undefined}
-                      isLoading={isLoading}
+                      isLoading={isLoading || sessionExpired}
                       handleRegenerate={handleRegenerate}
                     />
                   )}
@@ -711,6 +751,11 @@ export function Thread() {
           {chatStarted && (
             <div className="border-border bg-background border-t px-4 py-4">
               <div className="mx-auto max-w-3xl">
+                {sessionExpired && (
+                  <div className="mb-3">
+                    <SessionExpiredOverlay />
+                  </div>
+                )}
                 <ChatInput
                   input={input}
                   setInput={setInput}
@@ -722,6 +767,7 @@ export function Thread() {
                   textareaRef={chatInputRef}
                   placeholder="How can I support you today?"
                   onSettingsClick={() => setSettingsOpen(true)}
+                  sessionExpired={sessionExpired}
                 />
               </div>
             </div>
