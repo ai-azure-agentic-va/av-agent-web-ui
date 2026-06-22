@@ -93,7 +93,7 @@ type StreamContextType = ReturnType<typeof useStream<StateType>> & {
   thinkingStep: string;
   lastDonePayload: unknown;
   streamingMessageId: string | null;
-  sessionExpired: boolean;
+  stop: () => void;
 };
 
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
@@ -168,7 +168,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const [thinkingStep, setThinkingStep] = useState<string>("");
   const [lastDonePayload, setLastDonePayload] = useState<unknown>(null);
   const [errorOverride, setErrorOverride] = useState<Error | undefined>();
-  const [sessionExpired, setSessionExpired] = useState<boolean>(false);
 
   // Harvested during a run, committed to the keyed maps on finish.
   const pendingSourcesRef = useRef<Source[] | null>(null);
@@ -270,10 +269,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     onError: (err) => {
       const raw = err instanceof Error ? err.message : String(err ?? "");
       const is401 = raw.includes("401") || (err as any)?.status === 401;
-      const isSessionExpiry =
-        is401 && hasSubmittedRef.current && !raw.includes("Unauthorized:");
+      const isSessionExpiry = is401 && hasSubmittedRef.current;
       if (isSessionExpiry) {
-        setSessionExpired(true);
+        window.location.href = "/api/auth/logout";
         return;
       }
       const message =
@@ -330,6 +328,25 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     [stream, resetTurnState],
   );
 
+  // Wrap stop to also cancel the run on the backend. The SDK's stop() only
+  // closes the client-side SSE connection; without the cancel call the backend
+  // keeps processing the graph until it finishes naturally.
+  const stop = useCallback(async () => {
+    await stream.stop();
+    const currentRunId = runIdRef.current;
+    const currentThreadId = threadId;
+    if (currentRunId && currentThreadId) {
+      fetch(
+        `${apiUrl}/threads/${currentThreadId}/runs/${currentRunId}/cancel`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wait: false, action: "interrupt" }),
+        },
+      ).catch(console.error);
+    }
+  }, [stream, apiUrl, threadId]);
+
   // Follow-ups: prefer what the graph streamed this turn, else read from state.
   const followUpQuestions = useMemo<string[]>(() => {
     if (customFollowUps.length) return customFollowUps;
@@ -351,6 +368,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     () => ({
       ...stream,
       submit,
+      stop,
       error,
       sourcesMap,
       debugMap,
@@ -358,11 +376,11 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       thinkingStep,
       lastDonePayload,
       streamingMessageId,
-      sessionExpired,
     }),
     [
       stream,
       submit,
+      stop,
       error,
       sourcesMap,
       debugMap,
@@ -370,7 +388,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       thinkingStep,
       lastDonePayload,
       streamingMessageId,
-      sessionExpired,
     ],
   );
 
