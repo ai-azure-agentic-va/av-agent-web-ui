@@ -111,6 +111,7 @@ type ChatInputProps = {
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
   placeholder?: string;
   onSettingsClick?: () => void;
+  onStop?: () => void;
 };
 
 function ChatInput({
@@ -123,6 +124,7 @@ function ChatInput({
   textareaRef,
   placeholder = "Message Enterprise Technology Services...",
   onSettingsClick,
+  onStop,
 }: ChatInputProps) {
   return (
     <div className="border-border bg-card relative rounded-2xl border shadow-sm">
@@ -156,7 +158,7 @@ function ChatInput({
             {stream.isLoading ? (
               <button
                 type="button"
-                onClick={() => stream.stop()}
+                onClick={() => { stream.stop(); onStop?.(); }}
                 aria-label="Stop generating"
                 title="Stop generating"
                 className={cn(
@@ -625,6 +627,7 @@ export function Thread() {
                           textareaRef={chatInputRef}
                           placeholder="How can I support you today?"
                           onSettingsClick={() => setSettingsOpen(true)}
+                          onStop={() => setFirstTokenReceived(false)}
                         />
                       </div>
 
@@ -747,6 +750,7 @@ export function Thread() {
                   textareaRef={chatInputRef}
                   placeholder="How can I support you today?"
                   onSettingsClick={() => setSettingsOpen(true)}
+                  onStop={() => setFirstTokenReceived(false)}
                 />
               </div>
             </div>
