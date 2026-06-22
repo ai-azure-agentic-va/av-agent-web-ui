@@ -93,6 +93,7 @@ type StreamContextType = ReturnType<typeof useStream<StateType>> & {
   thinkingStep: string;
   lastDonePayload: unknown;
   streamingMessageId: string | null;
+  stop: () => void;
 };
 
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
@@ -327,6 +328,25 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     [stream, resetTurnState],
   );
 
+  // Wrap stop to also cancel the run on the backend. The SDK's stop() only
+  // closes the client-side SSE connection; without the cancel call the backend
+  // keeps processing the graph until it finishes naturally.
+  const stop = useCallback(async () => {
+    await stream.stop();
+    const currentRunId = runIdRef.current;
+    const currentThreadId = threadId;
+    if (currentRunId && currentThreadId) {
+      fetch(
+        `${apiUrl}/threads/${currentThreadId}/runs/${currentRunId}/cancel`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wait: false, action: "interrupt" }),
+        },
+      ).catch(console.error);
+    }
+  }, [stream, apiUrl, threadId]);
+
   // Follow-ups: prefer what the graph streamed this turn, else read from state.
   const followUpQuestions = useMemo<string[]>(() => {
     if (customFollowUps.length) return customFollowUps;
@@ -348,6 +368,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     () => ({
       ...stream,
       submit,
+      stop,
       error,
       sourcesMap,
       debugMap,
@@ -359,6 +380,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     [
       stream,
       submit,
+      stop,
       error,
       sourcesMap,
       debugMap,
