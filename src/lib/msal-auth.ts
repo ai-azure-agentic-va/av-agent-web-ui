@@ -1,5 +1,9 @@
 import "server-only";
-import { ConfidentialClientApplication, Configuration } from "@azure/msal-node";
+import {
+  AccountInfo,
+  ConfidentialClientApplication,
+  Configuration,
+} from "@azure/msal-node";
 import { cookies } from "next/headers";
 import crypto from "crypto";
 import { logger } from "@/lib/logger";
@@ -7,6 +11,45 @@ import { logger } from "@/lib/logger";
 const SESSION_COOKIE = "ets_session";
 const STATE_COOKIE = "oauth_state";
 const SESSION_MAX_AGE = 28800; // 8 hours
+
+// A user's group membership entry. `id` is the Entra group object ID; `name`
+// is the display name (only available when resolved via Graph — the token's
+// `groups` claim carries IDs only, so `name` is "" on that path).
+export type UserGroup = { id: string; name: string };
+
+const GUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isGuid(value: string): boolean {
+  return GUID_RE.test(value.trim());
+}
+
+/**
+ * Flattened, de-duplicated list of all configured access-control groups.
+ * AI_VA_USERS_GROUP_ID and AI_VA_ADMINS_GROUP_ID may each hold a single value
+ * or a comma-separated list, and each value may be a group object ID (GUID) or
+ * a display name.
+ */
+function getConfiguredGroups(): string[] {
+  const raw = [
+    process.env.AI_VA_USERS_GROUP_ID,
+    process.env.AI_VA_ADMINS_GROUP_ID,
+  ]
+    .filter(Boolean)
+    .flatMap((v) => (v as string).split(","))
+    .map((v) => v.trim())
+    .filter(Boolean);
+  return [...new Set(raw)];
+}
+
+/**
+ * True when any configured access-control group is a *name* (not a GUID). Name
+ * matching needs display names, which only the Graph lookup supplies — so this
+ * forces a Graph resolution at login.
+ */
+function configHasGroupName(): boolean {
+  return getConfiguredGroups().some((v) => !isGuid(v));
+}
 
 function getMsalApp(): ConfidentialClientApplication {
   const config: Configuration = {
@@ -55,7 +98,7 @@ export async function handleOAuthCallback(
   name: string;
   email: string;
   oid: string;
-  groups: string[];
+  groups: UserGroup[];
   accessToken: string;
   expiresAt: number;
 } | null> {
@@ -69,6 +112,29 @@ export async function handleOAuthCallback(
       redirectUri: getRedirectUri(),
     });
     const claims = result.idTokenClaims as Record<string, any>;
+    // Full dump of what a successful auth returns, so we can see exactly which
+    // claims Entra emits (roles, groups, wids, scp, etc.) for this user / App
+    // Registration. Only prints under LOG_LEVEL=DEBUG.
+    logger.debug(
+      "[auth] login success — id token claim keys:",
+      Object.keys(claims).join(", "),
+    );
+    logger.debug(
+      "[auth] login success — roles claim:",
+      JSON.stringify(claims.roles ?? null),
+    );
+    logger.debug(
+      "[auth] login success — wids (directory roles) claim:",
+      JSON.stringify(claims.wids ?? null),
+    );
+    logger.debug(
+      "[auth] login success — groups claim:",
+      JSON.stringify(claims.groups ?? null),
+    );
+    logger.debug(
+      "[auth] login success — full id token claims:",
+      JSON.stringify(claims),
+    );
     // Scopes requested vs. actually granted in the access token. The `scp`
     // claim is what Entra ultimately consented to (delegated permissions).
     logger.debug("[auth] requested scopes:", JSON.stringify(requestedScopes));
@@ -81,20 +147,40 @@ export async function handleOAuthCallback(
       JSON.stringify(claims.scp ?? null),
     );
 
-    // Groups can be absent from the token for two reasons: the App
-    // Registration isn't emitting a `groups` claim, or the user is over the
-    // ~200-group token limit (Entra sends an overage pointer instead). In
-    // either case fall back to Microsoft Graph so group validation still works.
-    let groups: string[] = Array.isArray(claims.groups) ? claims.groups : [];
-    if (groups.length === 0) {
+    // The token only carries group object IDs (no display names). Start with
+    // the claim, then resolve via Graph when either (a) the claim is absent
+    // (App Registration not emitting it, or the user is over the ~200-group
+    // token limit) or (b) access control is configured by group *name*, which
+    // requires display names that only Graph can supply.
+    let groups: UserGroup[] = Array.isArray(claims.groups)
+      ? claims.groups.map((id: string) => ({ id, name: "" }))
+      : [];
+    if (groups.length === 0 || configHasGroupName()) {
       logger.warn(
-        `[auth] no groups in token — falling back to Microsoft Graph (oid: ${claims.oid})`,
+        `[auth] resolving group membership via Microsoft Graph (oid: ${claims.oid}, reason: ${
+          groups.length === 0 ? "no groups claim" : "configured by name"
+        })`,
       );
-      groups = await fetchUserGroupsFromGraph(claims.oid);
+      // Preferred: delegated call using the signed-in user's own Graph token,
+      // minted from the auth-code refresh token (requires the Group.Read.All
+      // *delegated* permission with admin consent on the FE App Registration).
+      let resolved = await fetchUserGroupsDelegated(app, result.account);
       logger.debug(
-        "[auth] groups from Graph fallback:",
-        JSON.stringify(groups),
+        "[auth] groups from delegated Graph (/me):",
+        JSON.stringify(resolved),
       );
+      // Fallback: app-only (client credentials) call, in case the delegated
+      // token couldn't be acquired (e.g. delegated permission not consented).
+      if (resolved.length === 0) {
+        resolved = await fetchUserGroupsFromGraph(claims.oid);
+        logger.debug(
+          "[auth] groups from app-only Graph fallback:",
+          JSON.stringify(resolved),
+        );
+      }
+      // Keep the (named) Graph result if it succeeded; otherwise fall back to
+      // whatever the token claim gave us (IDs only).
+      if (resolved.length > 0) groups = resolved;
     }
 
     return {
@@ -111,15 +197,75 @@ export async function handleOAuthCallback(
 }
 
 /**
+ * Resolves the signed-in user's group membership using a *delegated* Microsoft
+ * Graph token. The token is minted from the auth-code refresh token via
+ * acquireTokenSilent (same MSAL instance that redeemed the code, so its cache
+ * holds the account + refresh token), then used to call /me/transitiveMemberOf.
+ *
+ * Requires the `Group.Read.All` *delegated* permission with admin consent on
+ * the FE App Registration. We cannot bundle this scope into the login request
+ * because API_SCOPE targets a different resource (Entra v2 rejects mixed-
+ * resource scope requests), so it is acquired here as a separate token.
+ * Returns transitive (nested) group object IDs, paging through all results.
+ */
+async function fetchUserGroupsDelegated(
+  app: ConfidentialClientApplication,
+  account: AccountInfo | null,
+): Promise<UserGroup[]> {
+  if (!account) return [];
+  try {
+    const tokenResult = await app.acquireTokenSilent({
+      account,
+      scopes: ["https://graph.microsoft.com/Group.Read.All"],
+    });
+    if (!tokenResult?.accessToken) {
+      logger.error(
+        "[auth] delegated Graph: failed to acquire user Graph token (is Group.Read.All delegated + admin-consented?)",
+      );
+      return [];
+    }
+
+    const groups: UserGroup[] = [];
+    let url: string | undefined =
+      "https://graph.microsoft.com/v1.0/me/transitiveMemberOf/microsoft.graph.group?$select=id,displayName&$top=999";
+
+    while (url) {
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${tokenResult.accessToken}` },
+      });
+      if (!res.ok) {
+        logger.error(
+          `[auth] delegated Graph: ${res.status} ${res.statusText} — ${await res.text()}`,
+        );
+        break;
+      }
+      const data = (await res.json()) as {
+        value?: Array<{ id?: string; displayName?: string }>;
+        "@odata.nextLink"?: string;
+      };
+      for (const obj of data.value ?? []) {
+        if (obj.id) groups.push({ id: obj.id, name: obj.displayName ?? "" });
+      }
+      url = data["@odata.nextLink"];
+    }
+    return groups;
+  } catch (err) {
+    logger.error("[auth] delegated Graph error:", (err as Error).message);
+    return [];
+  }
+}
+
+/**
  * Resolves a user's group membership via Microsoft Graph using an app-only
  * (client credentials) token. Used as a fallback when the `groups` claim is
  * missing from the ID token.
  *
  * Requires an application permission of `GroupMember.Read.All` (or
  * `Directory.Read.All`) granted with admin consent on the App Registration.
- * Returns transitive (nested) group object IDs, paging through all results.
+ * Returns transitive (nested) groups (id + display name), paging through all
+ * results.
  */
-async function fetchUserGroupsFromGraph(userOid: string): Promise<string[]> {
+async function fetchUserGroupsFromGraph(userOid: string): Promise<UserGroup[]> {
   if (!userOid) return [];
   try {
     const app = getMsalApp();
@@ -133,9 +279,9 @@ async function fetchUserGroupsFromGraph(userOid: string): Promise<string[]> {
       return [];
     }
 
-    const groups: string[] = [];
+    const groups: UserGroup[] = [];
     let url: string | undefined =
-      `https://graph.microsoft.com/v1.0/users/${userOid}/transitiveMemberOf/microsoft.graph.group?$select=id&$top=999`;
+      `https://graph.microsoft.com/v1.0/users/${userOid}/transitiveMemberOf/microsoft.graph.group?$select=id,displayName&$top=999`;
 
     while (url) {
       const res = await fetch(url, {
@@ -148,11 +294,11 @@ async function fetchUserGroupsFromGraph(userOid: string): Promise<string[]> {
         break;
       }
       const data = (await res.json()) as {
-        value?: Array<{ id?: string }>;
+        value?: Array<{ id?: string; displayName?: string }>;
         "@odata.nextLink"?: string;
       };
       for (const obj of data.value ?? []) {
-        if (obj.id) groups.push(obj.id);
+        if (obj.id) groups.push({ id: obj.id, name: obj.displayName ?? "" });
       }
       url = data["@odata.nextLink"];
     }
@@ -195,20 +341,18 @@ export async function getSessionUser(): Promise<Record<string, string> | null> {
 }
 
 /**
- * Checks whether the user belongs to at least one of the configured AD groups
- * using the "groups" claim from the ID token (requires groupMembershipClaims
- * = "SecurityGroup" on the App Registration).
+ * Checks whether the user belongs to at least one of the configured AD groups.
+ * AI_VA_USERS_GROUP_ID / AI_VA_ADMINS_GROUP_ID may each hold either a group
+ * object ID (GUID) or a group display name — matching is case-insensitive
+ * against the user's group IDs and names. (Name matching requires the groups
+ * to have been resolved via Graph; see configHasGroupName / handleOAuthCallback.)
  *
  * Returns { allowed: true } when no groups are configured.
  */
-export function checkGroupMembership(userGroups: string[]): {
+export function checkGroupMembership(userGroups: UserGroup[]): {
   allowed: boolean;
 } {
-  const usersGroupId = process.env.AI_VA_USERS_GROUP_ID?.trim();
-  const adminsGroupId = process.env.AI_VA_ADMINS_GROUP_ID?.trim();
-  const requiredGroups = [usersGroupId, adminsGroupId].filter(
-    Boolean,
-  ) as string[];
+  const requiredGroups = getConfiguredGroups();
 
   if (requiredGroups.length === 0) {
     logger.warn(
@@ -219,7 +363,13 @@ export function checkGroupMembership(userGroups: string[]): {
     return { allowed: true };
   }
 
-  return { allowed: userGroups.some((g) => requiredGroups.includes(g)) };
+  const required = requiredGroups.map((g) => g.toLowerCase());
+  const allowed = userGroups.some(
+    (g) =>
+      required.includes(g.id.toLowerCase()) ||
+      (g.name && required.includes(g.name.toLowerCase())),
+  );
+  return { allowed };
 }
 
 export { SESSION_COOKIE, STATE_COOKIE, SESSION_MAX_AGE };

@@ -178,12 +178,3 @@ export function useArtifactOpen() {
 
   return [open, onClose] as const;
 }
-
-/**
- * Artifacts may at their discretion provide additional context
- * that will be used when creating a new run.
- */
-export function useArtifactContext() {
-  const context = useContext(ArtifactSlotContext);
-  return context.context;
-}

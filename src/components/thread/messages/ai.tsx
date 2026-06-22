@@ -12,13 +12,14 @@ import { MarkdownText } from "../markdown-text";
 import { LoadExternalComponent } from "@langchain/langgraph-sdk/react-ui";
 import { cn } from "@/lib/utils";
 import { ToolCalls, ToolResult } from "./tool-calls";
-import { MessageContentComplex } from "@langchain/core/messages";
+import { ContentBlock } from "@langchain/core/messages";
 import { Fragment } from "react/jsx-runtime";
 import { isAgentInboxInterruptSchema } from "@/lib/agent-inbox-interrupt";
 import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
+import { useMemo } from "react";
 import { Bot } from "lucide-react";
 import { MessageFeedback } from "@/components/thread/feedback";
 import { DebugSection } from "./debug-section";
@@ -52,7 +53,7 @@ function CustomComponent({
 }
 
 function parseAnthropicStreamedToolCalls(
-  content: MessageContentComplex[],
+  content: ContentBlock[],
 ): AIMessage["tool_calls"] {
   const toolCallContents = content.filter((c) => c.type === "tool_use" && c.id);
 
@@ -115,9 +116,16 @@ export function AssistantMessage({
   isLoading: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
 }) {
-  const content = message?.content ?? [];
+  // Stable identity for the message content so the memos below don't re-run
+  // every render (the `?? []` fallback would otherwise be a fresh array each time).
+  const content = useMemo(() => message?.content ?? [], [message?.content]);
   // Strip the "Want to explore further?" section — it renders as chips below.
-  const contentString = stripFollowUpSection(getContentString(content));
+  // Memoized on the raw content so this (and the markdown linkify below) is not
+  // recomputed on every streamed token for messages whose content is unchanged.
+  const contentString = useMemo(
+    () => stripFollowUpSection(getContentString(content)),
+    [content],
+  );
   const [hideToolCallsToggle] = useQueryState(
     "hideToolCalls",
     parseAsBoolean.withDefault(false),
@@ -141,9 +149,13 @@ export function AssistantMessage({
   const threadInterrupt = thread.interrupt;
 
   const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
-  const anthropicStreamedToolCalls = Array.isArray(content)
-    ? parseAnthropicStreamedToolCalls(content)
-    : undefined;
+  const anthropicStreamedToolCalls = useMemo(
+    () =>
+      Array.isArray(content)
+        ? parseAnthropicStreamedToolCalls(content)
+        : undefined,
+    [content],
+  );
 
   const hasToolCalls =
     message &&
@@ -160,6 +172,14 @@ export function AssistantMessage({
 
   const sources = message?.id ? thread.sourcesMap?.[message.id] : undefined;
   const debug = message?.id ? thread.debugMap?.[message.id] : undefined;
+
+  // Citation-linked markdown source. Memoized so the regex linkify only re-runs
+  // when this message's content or its sources change — not every render of an
+  // unrelated streaming turn. Only consumed in the non-streaming branch below.
+  const linkedContent = useMemo(
+    () => linkifyCitations(contentString, sources),
+    [contentString, sources],
+  );
 
   // The run_id for feedback comes from the `done` SSE event payload,
   // stored on lastDonePayload by Stream.tsx
@@ -228,9 +248,7 @@ export function AssistantMessage({
                 {isStreaming ? (
                   <p className="whitespace-pre-wrap">{contentString}</p>
                 ) : (
-                  <MarkdownText>
-                    {linkifyCitations(contentString, sources)}
-                  </MarkdownText>
+                  <MarkdownText>{linkedContent}</MarkdownText>
                 )}
               </div>
             )}
