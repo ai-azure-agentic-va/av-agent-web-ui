@@ -337,11 +337,10 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     const currentThreadId = threadId;
     if (currentRunId && currentThreadId) {
       fetch(
-        `${apiUrl}/threads/${currentThreadId}/runs/${currentRunId}/cancel`,
+        `${apiUrl}/threads/${currentThreadId}/runs/${currentRunId}/cancel?wait=false&action=interrupt`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wait: false, action: "interrupt" }),
         },
       ).catch(console.error);
     }
