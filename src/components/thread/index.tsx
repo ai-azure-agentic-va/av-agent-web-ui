@@ -1,9 +1,10 @@
 import { v4 as uuidv4 } from "uuid";
 import {
-  Fragment,
   ReactNode,
   RefObject,
+  memo,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -51,12 +52,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../ui/tooltip";
-import {
-  useArtifactOpen,
-  ArtifactContent,
-  ArtifactTitle,
-  useArtifactContext,
-} from "./artifact";
+import { useArtifactOpen, ArtifactContent, ArtifactTitle } from "./artifact";
 
 const ssoEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH !== "true";
 
@@ -222,8 +218,65 @@ function ChatInput({
   );
 }
 
+// One assistant turn (the AI message plus its follow-up chips). Extracted and
+// memoized so the per-message follow-up parsing only re-runs when THIS message's
+// content changes — not on every streamed token of the active message. Without
+// this, the parent re-renders the whole list each chunk and re-parses every
+// message, which is the dominant cost that makes long threads feel laggy.
+const AssistantTurn = memo(function AssistantTurn({
+  message,
+  isLoading,
+  isStreamingLast,
+  handleRegenerate,
+  onFollowUpClick,
+}: {
+  message: Message;
+  isLoading: boolean;
+  isStreamingLast: boolean;
+  handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
+  onFollowUpClick: (question: string) => void;
+}) {
+  // Per-message follow-up chips, parsed from this answer's own content (works
+  // live and on reload). Suppressed while this message is the streaming tail.
+  const followUps = useMemo(
+    () =>
+      isStreamingLast
+        ? []
+        : extractFollowUps(getContentString(message.content)),
+    [isStreamingLast, message.content],
+  );
+
+  return (
+    <>
+      <AssistantMessage
+        message={message}
+        isLoading={isLoading}
+        handleRegenerate={handleRegenerate}
+      />
+      {followUps.length > 0 && (
+        <div className="flex flex-col gap-2 pb-2">
+          <p className="text-muted-foreground text-xs font-medium">
+            Want to explore further?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {followUps.map((q, i) => (
+              <button
+                key={i}
+                onClick={() => onFollowUpClick(q)}
+                className="border-border bg-card text-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary rounded-full border px-3 py-1.5 text-xs transition-colors"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+});
+
 export function Thread() {
-  const [artifactContext, setArtifactContext] = useArtifactContext();
+  // Only the setter is used now (to reset on thread switch). The artifact
   const [artifactOpen, closeArtifact] = useArtifactOpen();
 
   const [threadId, _setThreadId] = useQueryState("threadId");
@@ -257,7 +310,6 @@ export function Thread() {
   const setThreadId = (id: string | null) => {
     _setThreadId(id);
     closeArtifact();
-    setArtifactContext({});
   };
 
   // Fetch starter prompts once on mount
@@ -324,19 +376,16 @@ export function Thread() {
 
     const toolMessages = ensureToolCallsHaveResponses(stream.messages);
 
-    const context =
-      Object.keys(artifactContext).length > 0 ? artifactContext : undefined;
-
     stream.submit(
-      { messages: [...toolMessages, newHumanMessage], context },
+      { messages: [...toolMessages, newHumanMessage] },
       {
-        streamMode: ["values"],
-        streamSubgraphs: true,
-        streamResumable: true,
-        config: { configurable: { rag_enabled: true } },
+        // streamMode is intentionally omitted: the SDK already tracks the modes
+        // it needs (`messages-tuple` + `values`) from the getters this app reads.
+        // Passing ["values"] explicitly only forces full-thread-state snapshots
+        // on every super-step, which we don't want for per-token streaming.
+
         optimisticValues: (prev) => ({
           ...prev,
-          context,
           messages: [
             ...(prev.messages ?? []),
             ...toolMessages,
@@ -371,8 +420,8 @@ export function Thread() {
   };
 
   // Clicking a follow-up suggestion sends it immediately as a new turn,
-  // through the same submit path as the composer (tool-call reconciliation,
-  // context, and rag_enabled config all preserved).
+  // through the same submit path as the composer (tool-call reconciliation
+  // preserved).
   const handleFollowUpClick = (question: string) => {
     handleSubmit(null, question);
   };
@@ -384,10 +433,6 @@ export function Thread() {
     setFirstTokenReceived(false);
     stream.submit(undefined, {
       checkpoint: parentCheckpoint,
-      streamMode: ["values"],
-      streamSubgraphs: true,
-      streamResumable: true,
-      config: { configurable: { rag_enabled: true } },
     });
   };
 
@@ -520,7 +565,7 @@ export function Thread() {
           <StickToBottom className="relative flex-1 overflow-hidden">
             <StickyToBottomContent
               className={cn(
-                "scrollbar-thin absolute inset-0 overflow-y-auto px-4",
+                "absolute inset-0 scrollbar-thin overflow-y-auto px-4",
                 !chatStarted && "flex flex-col items-center justify-center",
                 chatStarted && "grid grid-rows-[1fr_auto]",
               )}
@@ -610,45 +655,16 @@ export function Thread() {
                             isLoading={isLoading}
                           />
                         ) : (
-                          <Fragment
+                          <AssistantTurn
                             key={message.id || `${message.type}-${index}`}
-                          >
-                            <AssistantMessage
-                              message={message}
-                              isLoading={isLoading}
-                              handleRegenerate={handleRegenerate}
-                            />
-                            {(() => {
-                              // Per-message follow-up chips, parsed from this
-                              // answer's own content (works live and on reload).
-                              const isStreamingLast =
-                                isLoading && index === messages.length - 1;
-                              const followUps = isStreamingLast
-                                ? []
-                                : extractFollowUps(
-                                    getContentString(message.content),
-                                  );
-                              if (!followUps.length) return null;
-                              return (
-                                <div className="flex flex-col gap-2 pb-2">
-                                  <p className="text-muted-foreground text-xs font-medium">
-                                    Want to explore further?
-                                  </p>
-                                  <div className="flex flex-wrap gap-2">
-                                    {followUps.map((q, i) => (
-                                      <button
-                                        key={i}
-                                        onClick={() => handleFollowUpClick(q)}
-                                        className="border-border bg-card text-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary rounded-full border px-3 py-1.5 text-xs transition-colors"
-                                      >
-                                        {q}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              );
-                            })()}
-                          </Fragment>
+                            message={message}
+                            isLoading={isLoading}
+                            isStreamingLast={
+                              isLoading && index === messages.length - 1
+                            }
+                            handleRegenerate={handleRegenerate}
+                            onFollowUpClick={handleFollowUpClick}
+                          />
                         ),
                       )}
 

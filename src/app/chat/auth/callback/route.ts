@@ -52,7 +52,23 @@ export async function GET(req: NextRequest) {
   }
 
   const response = NextResponse.redirect(`${base}/chat`);
-  response.cookies.set(SESSION_COOKIE, signSession(user), {
+  // Do NOT persist group membership in the session cookie. Groups are only
+  // needed for the membership check above; nothing reads session.groups later.
+  // A user in many groups (forced full Graph resolution when configured by
+  // name) would otherwise push the signed cookie past the browser's ~4KB limit,
+  // which silently drops it → middleware sees no session → redirect loop.
+  const sessionPayload = {
+    oid: user.oid,
+    name: user.name,
+    email: user.email,
+    accessToken: user.accessToken,
+    expiresAt: user.expiresAt,
+  };
+  const sessionToken = signSession(sessionPayload);
+  logger.debug(
+    `[auth] session cookie size: ${sessionToken.length} bytes (resolved ${user.groups.length} groups, not stored in cookie)`,
+  );
+  response.cookies.set(SESSION_COOKIE, sessionToken, {
     httpOnly: true,
     maxAge: SESSION_MAX_AGE,
     sameSite: "lax",
