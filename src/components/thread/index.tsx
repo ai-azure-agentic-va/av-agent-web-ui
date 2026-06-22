@@ -37,7 +37,6 @@ import {
   LogOut,
 } from "lucide-react";
 import { SettingsPanel } from "./settings-panel";
-import { SessionExpiredOverlay } from "./session-expired-overlay";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import ThreadHistory from "./history";
@@ -112,7 +111,6 @@ type ChatInputProps = {
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
   placeholder?: string;
   onSettingsClick?: () => void;
-  sessionExpired?: boolean;
 };
 
 function ChatInput({
@@ -125,7 +123,6 @@ function ChatInput({
   textareaRef,
   placeholder = "Message Enterprise Technology Services...",
   onSettingsClick,
-  sessionExpired = false,
 }: ChatInputProps) {
   return (
     <div className="border-border bg-card relative rounded-2xl border shadow-sm">
@@ -153,7 +150,6 @@ function ChatInput({
             }}
             placeholder={placeholder}
             rows={1}
-            disabled={sessionExpired}
             className="placeholder:text-muted-foreground/50 field-sizing-content max-h-[200px] min-h-[44px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm focus:ring-0 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
           />
           <div className="flex items-center gap-1 pb-1">
@@ -254,14 +250,12 @@ function ChatInput({
 const AssistantTurn = memo(function AssistantTurn({
   message,
   isLoading,
-  sessionExpired,
   isStreamingLast,
   handleRegenerate,
   onFollowUpClick,
 }: {
   message: Message;
   isLoading: boolean;
-  sessionExpired: boolean;
   isStreamingLast: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
   onFollowUpClick: (question: string) => void;
@@ -280,7 +274,7 @@ const AssistantTurn = memo(function AssistantTurn({
     <>
       <AssistantMessage
         message={message}
-        isLoading={isLoading || sessionExpired}
+        isLoading={isLoading}
         handleRegenerate={handleRegenerate}
       />
       {followUps.length > 0 && (
@@ -293,8 +287,7 @@ const AssistantTurn = memo(function AssistantTurn({
               <button
                 key={i}
                 onClick={() => onFollowUpClick(q)}
-                disabled={sessionExpired}
-                className="border-border bg-card text-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary rounded-full border px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                className="border-border bg-card text-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary rounded-full border px-3 py-1.5 text-xs transition-colors"
               >
                 {q}
               </button>
@@ -335,7 +328,6 @@ export function Thread() {
   const stream = useStreamContext();
   const messages = stream.messages;
   const isLoading = stream.isLoading;
-  const sessionExpired = stream.sessionExpired as boolean;
 
   const lastError = useRef<string | undefined>(undefined);
 
@@ -397,7 +389,7 @@ export function Thread() {
   const handleSubmit = (e: FormEvent | null, overrideText?: string) => {
     e?.preventDefault();
     const text = (overrideText ?? input).trim();
-    if (text.length === 0 || isLoading || sessionExpired) return;
+    if (text.length === 0 || isLoading) return;
     setFirstTokenReceived(false);
 
     const newHumanMessage: Message = {
@@ -433,7 +425,7 @@ export function Thread() {
   };
 
   const handleStarterPrompt = (message: string) => {
-    if (isLoading || sessionExpired) return;
+    if (isLoading) return;
     setFirstTokenReceived(false);
     const newHumanMessage: Message = {
       id: uuidv4(),
@@ -461,7 +453,7 @@ export function Thread() {
   const handleRegenerate = (
     parentCheckpoint: Checkpoint | null | undefined,
   ) => {
-    if (isLoading || sessionExpired) return;
+    if (isLoading) return;
     prevMessageLength.current = prevMessageLength.current - 1;
     setFirstTokenReceived(false);
     stream.submit(undefined, {
@@ -622,11 +614,6 @@ export function Thread() {
 
                       {/* Search Box */}
                       <div className="w-full max-w-2xl text-left">
-                        {sessionExpired && (
-                          <div className="mb-3">
-                            <SessionExpiredOverlay />
-                          </div>
-                        )}
                         <ChatInput
                           input={input}
                           setInput={setInput}
@@ -638,7 +625,6 @@ export function Thread() {
                           textareaRef={chatInputRef}
                           placeholder="How can I support you today?"
                           onSettingsClick={() => setSettingsOpen(true)}
-                          sessionExpired={sessionExpired}
                         />
                       </div>
 
@@ -698,7 +684,6 @@ export function Thread() {
                             key={message.id || `${message.type}-${index}`}
                             message={message}
                             isLoading={isLoading}
-                            sessionExpired={sessionExpired}
                             isStreamingLast={
                               isLoading && index === messages.length - 1
                             }
@@ -712,7 +697,7 @@ export function Thread() {
                     <AssistantMessage
                       key="interrupt-msg"
                       message={undefined}
-                      isLoading={isLoading || sessionExpired}
+                      isLoading={isLoading}
                       handleRegenerate={handleRegenerate}
                     />
                   )}
@@ -751,11 +736,6 @@ export function Thread() {
           {chatStarted && (
             <div className="border-border bg-background border-t px-4 py-4">
               <div className="mx-auto max-w-3xl">
-                {sessionExpired && (
-                  <div className="mb-3">
-                    <SessionExpiredOverlay />
-                  </div>
-                )}
                 <ChatInput
                   input={input}
                   setInput={setInput}
@@ -767,7 +747,6 @@ export function Thread() {
                   textareaRef={chatInputRef}
                   placeholder="How can I support you today?"
                   onSettingsClick={() => setSettingsOpen(true)}
-                  sessionExpired={sessionExpired}
                 />
               </div>
             </div>
