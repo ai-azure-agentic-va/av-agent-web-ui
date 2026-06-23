@@ -2,6 +2,7 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -168,6 +169,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const [thinkingStep, setThinkingStep] = useState<string>("");
   const [lastDonePayload, setLastDonePayload] = useState<unknown>(null);
   const [errorOverride, setErrorOverride] = useState<Error | undefined>();
+  const [stopped, setStopped] = useState(false);
 
   // Harvested during a run, committed to the keyed maps on finish.
   const pendingSourcesRef = useRef<Source[] | null>(null);
@@ -322,6 +324,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const submit = useCallback<typeof stream.submit>(
     (values, options) => {
       hasSubmittedRef.current = true;
+      setStopped(false);
       resetTurnState();
       return stream.submit(values, options);
     },
@@ -331,8 +334,11 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   // Wrap stop to also cancel the run on the backend. The SDK's stop() only
   // closes the client-side SSE connection; without the cancel call the backend
   // keeps processing the graph until it finishes naturally.
-  const stop = useCallback(async () => {
-    await stream.stop();
+  // setStopped(true) runs synchronously so isLoading flips to false immediately
+  // in the context without waiting for the SDK's async state update.
+  const stop = useCallback(() => {
+    setStopped(true);
+    stream.stop();
     const currentRunId = runIdRef.current;
     const currentThreadId = threadId;
     if (currentRunId && currentThreadId) {
@@ -355,10 +361,20 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       : [];
   }, [customFollowUps, stream.values]);
 
+  // When the SDK's isLoading naturally clears (run finished or errored), reset
+  // stopped so it doesn't interfere with future turns.
+  useEffect(() => {
+    if (!stream.isLoading) setStopped(false);
+  }, [stream.isLoading]);
+
+  // Override isLoading so stop() takes effect immediately in the UI without
+  // waiting for the SDK's async state to catch up.
+  const isLoading = stream.isLoading && !stopped;
+
   // The last AI message is the one actively streaming while a run is in flight.
   const streamingMessageId = useMemo<string | null>(
-    () => (stream.isLoading ? lastAiMessageId(stream.messages) : null),
-    [stream.isLoading, stream.messages],
+    () => (isLoading ? lastAiMessageId(stream.messages) : null),
+    [isLoading, stream.messages],
   );
 
   const error = errorOverride ?? (stream.error as Error | undefined);
@@ -369,6 +385,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       submit,
       stop,
       error,
+      isLoading,
       sourcesMap,
       debugMap,
       followUpQuestions,
@@ -381,6 +398,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       submit,
       stop,
       error,
+      isLoading,
       sourcesMap,
       debugMap,
       followUpQuestions,
