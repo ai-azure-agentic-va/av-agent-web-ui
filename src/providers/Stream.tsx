@@ -371,11 +371,17 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   // waiting for the SDK's async state to catch up.
   const isLoading = stream.isLoading && !stopped;
 
-  // The last AI message is the one actively streaming while a run is in flight.
-  const streamingMessageId = useMemo<string | null>(
-    () => (isLoading ? lastAiMessageId(stream.messages) : null),
-    [isLoading, stream.messages],
-  );
+  // The actively-streaming message is the LAST message in the thread (not just
+  // the last AI message). Once a new turn starts, the optimistic human message
+  // is appended after the previous AI message, so `lastAiMessageId` would point
+  // back at the already-completed AI message and incorrectly flag it as
+  // streaming — making it briefly drop markdown rendering until the new AI
+  // message arrives. Requiring the AI message to be last avoids that flicker.
+  const streamingMessageId = useMemo<string | null>(() => {
+    if (!isLoading) return null;
+    const last = stream.messages[stream.messages.length - 1];
+    return last?.type === "ai" && last.id ? last.id : null;
+  }, [isLoading, stream.messages]);
 
   const error = errorOverride ?? (stream.error as Error | undefined);
 

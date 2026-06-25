@@ -179,6 +179,7 @@ export function AssistantMessage({
     [contentString, sources],
   );
 
+
   // The run_id for feedback comes from the `done` SSE event payload,
   // stored on lastDonePayload by Stream.tsx
   const lastDonePayload = thread.lastDonePayload as Record<
