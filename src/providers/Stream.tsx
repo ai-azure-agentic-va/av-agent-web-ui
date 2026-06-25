@@ -336,7 +336,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   // keeps processing the graph until it finishes naturally.
   // setStopped(true) runs synchronously so isLoading flips to false immediately
   // in the context without waiting for the SDK's async state update.
-  const stop = useCallback(() => {
+  const stop = useCallback(async () => {
     setStopped(true);
     stream.stop();
     const currentRunId = runIdRef.current;
