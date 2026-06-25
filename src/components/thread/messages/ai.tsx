@@ -288,10 +288,7 @@ export function AssistantMessage({
 
             {/* Toolbar row: thumbs up, thumbs down, copy, refresh */}
             <div
-              className={cn(
-                "flex items-center gap-2 transition-opacity",
-                "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
-              )}
+              className="flex items-center gap-2"
             >
               <BranchSwitcher
                 branch={meta?.branch}
