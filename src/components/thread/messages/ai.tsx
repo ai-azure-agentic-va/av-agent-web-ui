@@ -137,9 +137,6 @@ export function AssistantMessage({
     process.env.NEXT_PUBLIC_HIDE_TOOL_CALLS === "true" || hideToolCallsToggle;
 
   const thread = useStreamContext();
-  const streamingMessageId = thread.streamingMessageId as string | null;
-  const isStreaming =
-    !!streamingMessageId && streamingMessageId === message?.id;
   const isLastMessage =
     thread.messages[thread.messages.length - 1].id === message?.id;
   const hasNoAIOrToolMessages = !thread.messages.find(
@@ -175,7 +172,8 @@ export function AssistantMessage({
 
   // Citation-linked markdown source. Memoized so the regex linkify only re-runs
   // when this message's content or its sources change — not every render of an
-  // unrelated streaming turn. Only consumed in the non-streaming branch below.
+  // unrelated streaming turn. During streaming `sources` is empty, so this is
+  // just the raw content; once sources arrive the `[n]` markers become links.
   const linkedContent = useMemo(
     () => linkifyCitations(contentString, sources),
     [contentString, sources],
@@ -245,11 +243,9 @@ export function AssistantMessage({
           <>
             {contentString.length > 0 && (
               <div className="prose prose-sm dark:prose-invert max-w-none">
-                {isStreaming ? (
-                  <p className="whitespace-pre-wrap">{contentString}</p>
-                ) : (
-                  <MarkdownText>{linkedContent}</MarkdownText>
-                )}
+                {/* Render markdown live as tokens stream in, instead of showing
+                    plain text and only formatting once the stream completes. */}
+                <MarkdownText>{linkedContent}</MarkdownText>
               </div>
             )}
 
