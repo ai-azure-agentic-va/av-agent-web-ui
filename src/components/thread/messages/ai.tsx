@@ -335,7 +335,7 @@ export function AssistantMessageLoading({
   );
 }
 
-export function ThinkingIndicator() {
+export function ThinkingIndicator({ thinkingStep }: { thinkingStep?: string }) {
   return (
     <div className="message-animate text-muted-foreground ml-11 flex items-center gap-2">
       <div className="flex items-center gap-1">
@@ -343,7 +343,7 @@ export function ThinkingIndicator() {
         <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full [animation-delay:0.2s]" />
         <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full [animation-delay:0.4s]" />
       </div>
-      <span className="text-sm italic">Thinking...</span>
+      <span className="text-sm italic">{thinkingStep || "Thinking..."}</span>
     </div>
   );
 }

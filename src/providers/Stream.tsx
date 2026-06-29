@@ -110,6 +110,11 @@ const THINKING_STEP_LABELS: Record<string, string> = {
   refining_search: "Refining search results...",
   retry_search_complete: "Additional sources found",
   generating: "Generating response...",
+  // ServiceNow subagent. Its model->tool->model loop runs as one blocking
+  // delegation on the parent graph, so without this the UI shows no streamed
+  // output for the seconds it works. The backend emits this top-level event
+  // (SubagentProgressMiddleware) the moment the orchestrator delegates.
+  servicenow_delegating: "Searching ServiceNow tickets...",
 };
 
 function normalizeApiUrl(value: string | undefined | null): string {
