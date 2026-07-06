@@ -87,11 +87,26 @@ export type DebugPayload = {
   settings?: Record<string, unknown>;
 };
 
+export type ThinkingStep = {
+  key: string;
+  label: string;
+  startedAt: number;
+  endedAt?: number;
+};
+
+export type ThinkingStepsEntry = {
+  steps: ThinkingStep[];
+  turnStartedAt: number;
+  turnEndedAt: number;
+};
+
 type StreamContextType = ReturnType<typeof useStream<StateType>> & {
   sourcesMap: Record<string, Source[]>;
   debugMap: Record<string, DebugPayload>;
   followUpQuestions: string[];
   thinkingStep: string;
+  thinkingSteps: ThinkingStep[];
+  thinkingStepsMap: Record<string, ThinkingStepsEntry>;
   lastDonePayload: unknown;
   streamingMessageId: string | null;
   stop: () => void;
@@ -102,19 +117,14 @@ const StreamContext = createContext<StreamContextType | undefined>(undefined);
 const DEFAULT_API_URL = "/api";
 const DEFAULT_ASSISTANT_ID = "chat";
 
-const THINKING_STEP_LABELS: Record<string, string> = {
-  rewriting_query: "Rewriting query...",
-  query_rewritten: "Analyzing query",
-  search_start: "Searching knowledge base...",
-  search_complete: "Found relevant sources",
-  refining_search: "Refining search results...",
-  retry_search_complete: "Additional sources found",
-  generating: "Generating response...",
-  // ServiceNow subagent. Its model->tool->model loop runs as one blocking
-  // delegation on the parent graph, so without this the UI shows no streamed
-  // output for the seconds it works. The backend emits this top-level event
-  // (SubagentProgressMiddleware) the moment the orchestrator delegates.
+// Running label while a step is open; done label once it closes.
+const STEP_RUNNING_LABELS: Record<string, string> = {
+  search: "Searching knowledge base...",
   servicenow_delegating: "Searching ServiceNow tickets...",
+};
+const STEP_DONE_LABELS: Record<string, string> = {
+  search: "Searched knowledge base",
+  servicenow_delegating: "Searched ServiceNow tickets",
 };
 
 function normalizeApiUrl(value: string | undefined | null): string {
@@ -171,7 +181,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const [sourcesMap, setSourcesMap] = useState<Record<string, Source[]>>({});
   const [debugMap, setDebugMap] = useState<Record<string, DebugPayload>>({});
   const [customFollowUps, setCustomFollowUps] = useState<string[]>([]);
-  const [thinkingStep, setThinkingStep] = useState<string>("");
+  const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
+  const [thinkingStepsMap, setThinkingStepsMap] = useState<Record<string, ThinkingStepsEntry>>({});
   const [lastDonePayload, setLastDonePayload] = useState<unknown>(null);
   const [errorOverride, setErrorOverride] = useState<Error | undefined>();
   const [stopped, setStopped] = useState(false);
@@ -184,10 +195,14 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   // sources as an authoritative replacement (an empty list clears the panel)
   // rather than falling back to the accumulated / state sources.
   const sourcesFinalRef = useRef<boolean>(false);
+  // Mirrors thinkingSteps state; the ref gives onFinish synchronous access to
+  // the accumulating array without a stale-closure problem.
+  const pendingStepsRef = useRef<ThinkingStep[]>([]);
 
   const resetTurnState = useCallback(() => {
     setCustomFollowUps([]);
-    setThinkingStep("");
+    setThinkingSteps([]);
+    pendingStepsRef.current = [];
     setErrorOverride(undefined);
     pendingSourcesRef.current = null;
     pendingDebugRef.current = null;
@@ -196,13 +211,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   }, []);
 
   const hasSubmittedRef = useRef(false);
+  const turnStartRef = useRef<number>(0);
 
   const harvestCustomEvent = useCallback((data: unknown) => {
-    // A plain string is treated as a thinking-step label.
-    if (typeof data === "string") {
-      setThinkingStep(THINKING_STEP_LABELS[data] || data);
-      return;
-    }
     if (!data || typeof data !== "object") return;
     const body = data as Record<string, unknown>;
 
@@ -224,7 +235,50 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       return;
     }
 
-    if (step) setThinkingStep(THINKING_STEP_LABELS[step] || step);
+    // --- Step timeline reducer ---
+    // Each recognised event either opens a new step or closes an existing one.
+    // pendingStepsRef is the source of truth; setThinkingSteps keeps the state
+    // in sync so React re-renders on every change.
+    const now = Date.now();
+    if (step === "search_start") {
+      // Close any open step, then open a new search step.
+      pendingStepsRef.current = [
+        ...pendingStepsRef.current.map((s) =>
+          s.endedAt === undefined
+            ? { ...s, label: STEP_DONE_LABELS[s.key] ?? s.label, endedAt: now }
+            : s,
+        ),
+        { key: "search", label: STEP_RUNNING_LABELS["search"], startedAt: now },
+      ];
+      setThinkingSteps([...pendingStepsRef.current]);
+    } else if (step === "search_complete") {
+      // Close the last open search step (don't open a new one).
+      let closed = false;
+      pendingStepsRef.current = pendingStepsRef.current.map((s) => {
+        if (!closed && s.key === "search" && s.endedAt === undefined) {
+          closed = true;
+          return { ...s, label: STEP_DONE_LABELS["search"] ?? s.label, endedAt: now };
+        }
+        return s;
+      });
+      setThinkingSteps([...pendingStepsRef.current]);
+    } else if (step === "servicenow_delegating") {
+      // Close any open step, then open the ServiceNow step.
+      pendingStepsRef.current = [
+        ...pendingStepsRef.current.map((s) =>
+          s.endedAt === undefined
+            ? { ...s, label: STEP_DONE_LABELS[s.key] ?? s.label, endedAt: now }
+            : s,
+        ),
+        {
+          key: "servicenow_delegating",
+          label: STEP_RUNNING_LABELS["servicenow_delegating"],
+          startedAt: now,
+        },
+      ];
+      setThinkingSteps([...pendingStepsRef.current]);
+    }
+    // --- End step timeline reducer ---
 
     if (Array.isArray(body.sources)) {
       // Accumulate across events by merging on the backend-guaranteed `index`,
@@ -291,7 +345,14 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     },
     onFinish: (state) => {
       const messages = (state?.values?.messages ?? []) as Message[];
-      const aiId = lastAiMessageId(messages);
+      // Prefer the ID tracked from stream.messages (what AssistantMessage
+      // renders) over extracting from state.values, which can lag or differ.
+      const aiId = lastSeenAiIdRef.current ?? lastAiMessageId(messages);
+      console.debug("[Stream onFinish]", {
+        aiId,
+        pendingSteps: pendingStepsRef.current.length,
+        fromState: lastAiMessageId(messages),
+      });
 
       // When `sources_final` arrived it is authoritative: use the pending list
       // verbatim (an empty list means the answer cited nothing → no panel).
@@ -320,7 +381,27 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
         ...(sources ? { sources } : {}),
         ...(debug ? { debug } : {}),
       });
-      setThinkingStep("");
+
+      // Seal any open thinking step and commit the finished trace to the map.
+      if (pendingStepsRef.current.length && aiId) {
+        const now = Date.now();
+        const sealedSteps = pendingStepsRef.current.map((s) =>
+          s.endedAt === undefined
+            ? { ...s, label: STEP_DONE_LABELS[s.key] ?? s.label, endedAt: now }
+            : s,
+        );
+        setThinkingStepsMap((prev) => ({
+          ...prev,
+          [aiId]: {
+            steps: sealedSteps,
+            turnStartedAt: turnStartRef.current,
+            turnEndedAt: now,
+          },
+        }));
+      }
+      pendingStepsRef.current = [];
+      setThinkingSteps([]);
+
       void refreshThreads().catch(console.error);
     },
   });
@@ -329,6 +410,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const submit = useCallback<typeof stream.submit>(
     (values, options) => {
       hasSubmittedRef.current = true;
+      turnStartRef.current = Date.now();
       setStopped(false);
       resetTurnState();
       return stream.submit(values, options);
@@ -366,6 +448,18 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       : [];
   }, [customFollowUps, stream.values]);
 
+  // Tracks the last AI message ID visible in stream.messages — the same source
+  // AssistantMessage reads from. Updated on every render so onFinish can use it
+  // as a reliable map key even when state.values.messages lags or differs.
+  const lastSeenAiIdRef = useRef<string | null>(null);
+  for (let i = stream.messages.length - 1; i >= 0; i--) {
+    const m = stream.messages[i];
+    if (m?.type === "ai" && m.id) {
+      lastSeenAiIdRef.current = m.id;
+      break;
+    }
+  }
+
   // When the SDK's isLoading naturally clears (run finished or errored), reset
   // stopped so it doesn't interfere with future turns.
   useEffect(() => {
@@ -390,6 +484,10 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
   const error = errorOverride ?? (stream.error as Error | undefined);
 
+  // Derived from the live step array so AssistantMessageLoading still gets a
+  // subtitle string without any changes to its props.
+  const thinkingStep = thinkingSteps.at(-1)?.label ?? "";
+
   const streamValue = useMemo<StreamContextType>(
     () => ({
       ...stream,
@@ -401,6 +499,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       debugMap,
       followUpQuestions,
       thinkingStep,
+      thinkingSteps,
+      thinkingStepsMap,
       lastDonePayload,
       streamingMessageId,
     }),
@@ -414,6 +514,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       debugMap,
       followUpQuestions,
       thinkingStep,
+      thinkingSteps,
+      thinkingStepsMap,
       lastDonePayload,
       streamingMessageId,
     ],

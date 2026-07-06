@@ -722,7 +722,7 @@ export function Thread() {
                           lastMessage.tool_calls &&
                           lastMessage.tool_calls.length > 0);
                       return isAfterToolCall ? (
-                        <ThinkingIndicator thinkingStep={stream.thinkingStep} />
+                        <ThinkingIndicator thinkingSteps={stream.thinkingSteps} />
                       ) : null;
                     })()}
                 </>

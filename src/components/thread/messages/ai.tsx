@@ -1,5 +1,5 @@
 import { parsePartialJson } from "@langchain/core/output_parsers";
-import { useStreamContext } from "@/providers/Stream";
+import { useStreamContext, ThinkingStep, ThinkingStepsEntry } from "@/providers/Stream";
 import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
 import {
   getContentString,
@@ -19,8 +19,8 @@ import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
-import { useMemo } from "react";
-import { Bot } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Bot, Check, ChevronRight } from "lucide-react";
 import { MessageFeedback } from "@/components/thread/feedback";
 import { DebugSection } from "./debug-section";
 
@@ -169,6 +169,7 @@ export function AssistantMessage({
 
   const sources = message?.id ? thread.sourcesMap?.[message.id] : undefined;
   const debug = message?.id ? thread.debugMap?.[message.id] : undefined;
+  const thoughtEntry = message?.id ? thread.thinkingStepsMap?.[message.id] : undefined;
 
   // Citation-linked markdown source. Memoized so the regex linkify only re-runs
   // when this message's content or its sources change — not every render of an
@@ -211,7 +212,8 @@ export function AssistantMessage({
     !(sources && sources.length > 0) &&
     !debug &&
     !interruptVisible &&
-    !customComponents?.length
+    !customComponents?.length &&
+    !thoughtEntry
   ) {
     return null;
   }
@@ -242,6 +244,8 @@ export function AssistantMessage({
           </>
         ) : (
           <>
+            {thoughtEntry && <ThoughtSummary entry={thoughtEntry} />}
+
             {contentString.length > 0 && (
               <div className="prose prose-sm dark:prose-invert max-w-none">
                 {/* Render markdown live as tokens stream in, instead of showing
@@ -309,6 +313,45 @@ export function AssistantMessage({
   );
 }
 
+function ThoughtSummary({ entry }: { entry: ThinkingStepsEntry }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!entry.steps.length) return null;
+
+  const durationMs = entry.turnEndedAt - entry.turnStartedAt;
+  const durationSec = Math.max(1, Math.round(durationMs / 1000));
+
+  return (
+    <div className="text-muted-foreground text-sm">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="hover:text-foreground flex items-center gap-1 transition-colors"
+      >
+        <ChevronRight
+          className={cn(
+            "h-3.5 w-3.5 transition-transform",
+            expanded && "rotate-90",
+          )}
+        />
+        <span>Thought for {durationSec}s</span>
+      </button>
+      {expanded && (
+        <div className="mt-2 flex flex-col gap-1.5 pl-1">
+          {entry.steps.map((step) => (
+            <div
+              key={`${step.key}-${step.startedAt}`}
+              className="flex items-center gap-2"
+            >
+              <Check className="text-primary h-3.5 w-3.5 shrink-0" />
+              <span>{step.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AssistantMessageLoading({
   thinkingStep,
 }: {
@@ -335,15 +378,59 @@ export function AssistantMessageLoading({
   );
 }
 
-export function ThinkingIndicator({ thinkingStep }: { thinkingStep?: string }) {
-  return (
-    <div className="message-animate text-muted-foreground ml-11 flex items-center gap-2">
-      <div className="flex items-center gap-1">
-        <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full" />
-        <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full [animation-delay:0.2s]" />
-        <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full [animation-delay:0.4s]" />
+export function ThinkingIndicator({
+  thinkingSteps,
+}: {
+  thinkingSteps: ThinkingStep[];
+}) {
+  if (thinkingSteps.length === 0) {
+    return (
+      <div className="message-animate text-muted-foreground ml-11 flex items-center gap-2">
+        <div className="flex items-center gap-1">
+          <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full" />
+          <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full [animation-delay:0.2s]" />
+          <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full [animation-delay:0.4s]" />
+        </div>
+        <span className="text-sm italic">Thinking...</span>
       </div>
-      <span className="text-sm italic">{thinkingStep || "Thinking..."}</span>
+    );
+  }
+
+  return (
+    <div className="message-animate ml-11 flex flex-col gap-1.5">
+      {thinkingSteps.map((step, i) => {
+        const isDone = step.endedAt !== undefined;
+        const isLast = i === thinkingSteps.length - 1;
+        return (
+          <div
+            key={`${step.key}-${step.startedAt}`}
+            className="flex items-center gap-2"
+          >
+            {isDone ? (
+              <Check className="text-primary h-3.5 w-3.5 shrink-0" />
+            ) : (
+              <div
+                className={cn(
+                  "h-2 w-2 shrink-0 rounded-full",
+                  isLast
+                    ? "bg-primary/60 animate-pulse"
+                    : "bg-primary/40",
+                )}
+              />
+            )}
+            <span
+              className={cn(
+                "text-sm",
+                isDone
+                  ? "text-muted-foreground"
+                  : "text-muted-foreground italic",
+              )}
+            >
+              {step.label}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
