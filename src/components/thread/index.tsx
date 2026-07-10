@@ -13,12 +13,12 @@ import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
 import { FormEvent } from "react";
 import { getContentString, extractFollowUps } from "./utils";
+import { ACTIVITY_LABELS } from "@/lib/activity-labels";
 import { Button } from "../ui/button";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import {
   AssistantMessage,
   AssistantMessageLoading,
-  ThinkingIndicator,
 } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
 import {
@@ -321,7 +321,6 @@ export function Thread() {
 
   const [input, setInput] = useState("");
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
-  const [firstTokenReceived, setFirstTokenReceived] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [starterPrompts, setStarterPrompts] = useState<StarterPrompt[]>([]);
   const [starterPromptsLoading, setStarterPromptsLoading] = useState(true);
@@ -376,23 +375,10 @@ export function Thread() {
     }
   }, [stream.error]);
 
-  const prevMessageLength = useRef(0);
-  useEffect(() => {
-    if (
-      messages.length !== prevMessageLength.current &&
-      messages?.length &&
-      messages[messages.length - 1].type === "ai"
-    ) {
-      setFirstTokenReceived(true);
-    }
-    prevMessageLength.current = messages.length;
-  }, [messages]);
-
   const handleSubmit = (e: FormEvent | null, overrideText?: string) => {
     e?.preventDefault();
     const text = (overrideText ?? input).trim();
     if (text.length === 0 || isLoading) return;
-    setFirstTokenReceived(false);
 
     const newHumanMessage: Message = {
       id: uuidv4(),
@@ -428,7 +414,6 @@ export function Thread() {
 
   const handleStarterPrompt = (message: string) => {
     if (isLoading) return;
-    setFirstTokenReceived(false);
     const newHumanMessage: Message = {
       id: uuidv4(),
       type: "human",
@@ -456,8 +441,6 @@ export function Thread() {
     parentCheckpoint: Checkpoint | null | undefined,
   ) => {
     if (isLoading) return;
-    prevMessageLength.current = prevMessageLength.current - 1;
-    setFirstTokenReceived(false);
     stream.submit(undefined, {
       checkpoint: parentCheckpoint,
     });
@@ -627,7 +610,6 @@ export function Thread() {
                           textareaRef={chatInputRef}
                           placeholder="How can I support you today?"
                           onSettingsClick={() => setSettingsOpen(true)}
-                          onStop={() => setFirstTokenReceived(false)}
                         />
                       </div>
 
@@ -705,25 +687,32 @@ export function Thread() {
                     />
                   )}
 
-                  {isLoading && !firstTokenReceived && (
-                    <AssistantMessageLoading
-                      thinkingStep={stream.thinkingStep}
-                    />
-                  )}
-
                   {isLoading &&
-                    firstTokenReceived &&
                     (() => {
-                      const lastMessage = messages[messages.length - 1];
-                      const isAfterToolCall =
-                        lastMessage?.type === "tool" ||
-                        (lastMessage?.type === "ai" &&
-                          "tool_calls" in lastMessage &&
-                          lastMessage.tool_calls &&
-                          lastMessage.tool_calls.length > 0);
-                      return isAfterToolCall ? (
-                        <ThinkingIndicator thinkingSteps={stream.thinkingSteps} />
-                      ) : null;
+                      // Once the current turn has an AI message, the live
+                      // activity disclosure renders on top of it (inside
+                      // AssistantMessage), so no separate bottom indicator is
+                      // needed. Only before that first AI message appears do we
+                      // show the lightweight "starting" bubble here.
+                      let start = 0;
+                      for (let i = messages.length - 1; i >= 0; i -= 1) {
+                        if (messages[i]?.type === "human") {
+                          start = i + 1;
+                          break;
+                        }
+                      }
+                      const hasAiThisTurn = messages
+                        .slice(start)
+                        .some((m) => m.type === "ai");
+                      if (hasAiThisTurn) return null;
+
+                      return (
+                        <AssistantMessageLoading
+                          thinkingStep={
+                            stream.thinkingStep || ACTIVITY_LABELS.gettingStarted
+                          }
+                        />
+                      );
                     })()}
                 </>
               }
@@ -752,7 +741,6 @@ export function Thread() {
                   textareaRef={chatInputRef}
                   placeholder="How can I support you today?"
                   onSettingsClick={() => setSettingsOpen(true)}
-                  onStop={() => setFirstTokenReceived(false)}
                 />
               </div>
             </div>

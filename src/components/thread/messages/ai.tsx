@@ -1,5 +1,10 @@
 import { parsePartialJson } from "@langchain/core/output_parsers";
-import { useStreamContext, ThinkingStep, ThinkingStepsEntry } from "@/providers/Stream";
+import {
+  useStreamContext,
+  ThinkingStep,
+  deriveActivityStepsForAnswer,
+  isTurnAnswer,
+} from "@/providers/Stream";
 import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
 import {
   getContentString,
@@ -23,6 +28,7 @@ import { useMemo, useState } from "react";
 import { Bot, Check, ChevronRight } from "lucide-react";
 import { MessageFeedback } from "@/components/thread/feedback";
 import { DebugSection } from "./debug-section";
+import { ACTIVITY_LABELS } from "@/lib/activity-labels";
 
 function CustomComponent({
   message,
@@ -171,6 +177,43 @@ export function AssistantMessage({
   const debug = message?.id ? thread.debugMap?.[message.id] : undefined;
   const thoughtEntry = message?.id ? thread.thinkingStepsMap?.[message.id] : undefined;
 
+  // Host the LIVE activity disclosure on the current turn's last AI message, so
+  // it sits on top of the streaming answer in the same slot the sealed "Thought
+  // for Ns" disclosure will occupy — no position jump when the run finishes.
+  const lastAiId = useMemo(() => {
+    // Only needed while streaming; skip the scan on settled threads.
+    if (!thread.isLoading) return null;
+    const msgs = thread.messages;
+    for (let i = msgs.length - 1; i >= 0; i -= 1) {
+      if (msgs[i]?.type === "ai" && msgs[i]?.id) return msgs[i].id;
+    }
+    return null;
+  }, [thread.messages, thread.isLoading]);
+  const showLiveThought =
+    thread.isLoading &&
+    !thoughtEntry &&
+    message?.id === lastAiId &&
+    thread.thinkingSteps.length > 0;
+
+  // For turns NOT run in this session (opened from chat history), the sealed
+  // live trace (thoughtEntry) doesn't exist. Rebuild the trace from the turn's
+  // persisted messages so history shows the same tool tracing the boxes do.
+  // Only host it on the turn's answer message, and only when there's no live or
+  // sealed trace already covering it.
+  const historicalSteps = useMemo(() => {
+    if (
+      isToolResult ||
+      thoughtEntry ||
+      showLiveThought ||
+      !message?.id ||
+      !isTurnAnswer(thread.messages, message.id)
+    ) {
+      return null;
+    }
+    const steps = deriveActivityStepsForAnswer(thread.messages, message.id);
+    return steps.length ? steps : null;
+  }, [isToolResult, thoughtEntry, showLiveThought, message?.id, thread.messages]);
+
   // Citation-linked markdown source. Memoized so the regex linkify only re-runs
   // when this message's content or its sources change — not every render of an
   // unrelated streaming turn. During streaming `sources` is empty, so this is
@@ -213,7 +256,9 @@ export function AssistantMessage({
     !debug &&
     !interruptVisible &&
     !customComponents?.length &&
-    !thoughtEntry
+    !thoughtEntry &&
+    !showLiveThought &&
+    !historicalSteps
   ) {
     return null;
   }
@@ -244,7 +289,22 @@ export function AssistantMessage({
           </>
         ) : (
           <>
-            {thoughtEntry && <ThoughtSummary entry={thoughtEntry} />}
+            {thoughtEntry ? (
+              <ThoughtDisclosure
+                steps={thoughtEntry.steps}
+                durationSec={Math.max(
+                  1,
+                  Math.round(
+                    (thoughtEntry.turnEndedAt - thoughtEntry.turnStartedAt) /
+                      1000,
+                  ),
+                )}
+              />
+            ) : showLiveThought ? (
+              <ThoughtDisclosure steps={thread.thinkingSteps} live />
+            ) : historicalSteps ? (
+              <ThoughtDisclosure steps={historicalSteps} />
+            ) : null}
 
             {contentString.length > 0 && (
               <div className="prose prose-sm dark:prose-invert max-w-none">
@@ -313,39 +373,69 @@ export function AssistantMessage({
   );
 }
 
-function ThoughtSummary({ entry }: { entry: ThinkingStepsEntry }) {
+// A single collapsed disclosure anchored on top of the assistant answer. It is
+// shown BOTH while the turn is generating (live: header = current activity, e.g.
+// "Searching ServiceNow tickets…", with a pulse) and after it finishes (sealed:
+// header = "Thought for Ns"). Rendering it in the same slot in both states is
+// what stops the old "jump" where the trace only appeared after generation.
+function ThoughtDisclosure({
+  steps,
+  durationSec,
+  live = false,
+}: {
+  steps: ThinkingStep[];
+  durationSec?: number;
+  live?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
 
-  if (!entry.steps.length) return null;
+  if (!steps.length) return null;
 
-  const durationMs = entry.turnEndedAt - entry.turnStartedAt;
-  const durationSec = Math.max(1, Math.round(durationMs / 1000));
+  // While live, prefer the currently-open step's label; if all steps have
+  // closed (e.g. search finished and the answer is now streaming), fall back to
+  // the generic working label.
+  const openStep = steps.find((s) => s.endedAt === undefined);
+  const headerLabel = live
+    ? (openStep?.label ?? ACTIVITY_LABELS.working)
+    : durationSec != null
+      ? `${ACTIVITY_LABELS.thoughtPrefix} ${durationSec}${ACTIVITY_LABELS.thoughtSuffix}`
+      : ACTIVITY_LABELS.thoughtProcess;
 
   return (
     <div className="text-muted-foreground text-sm">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="hover:text-foreground flex items-center gap-1 transition-colors"
+        className="hover:text-foreground flex items-center gap-1.5 transition-colors"
       >
         <ChevronRight
           className={cn(
-            "h-3.5 w-3.5 transition-transform",
+            "h-3.5 w-3.5 shrink-0 transition-transform",
             expanded && "rotate-90",
           )}
         />
-        <span>Thought for {durationSec}s</span>
+        {live && (
+          <span className="bg-primary/60 h-1.5 w-1.5 shrink-0 animate-pulse rounded-full" />
+        )}
+        <span className={cn(live && "italic")}>{headerLabel}</span>
       </button>
       {expanded && (
         <div className="mt-2 flex flex-col gap-1.5 pl-1">
-          {entry.steps.map((step) => (
-            <div
-              key={`${step.key}-${step.startedAt}`}
-              className="flex items-center gap-2"
-            >
-              <Check className="text-primary h-3.5 w-3.5 shrink-0" />
-              <span>{step.label}</span>
-            </div>
-          ))}
+          {steps.map((step) => {
+            const isDone = step.endedAt !== undefined;
+            return (
+              <div
+                key={`${step.key}-${step.startedAt}`}
+                className="flex items-center gap-2"
+              >
+                {isDone ? (
+                  <Check className="text-primary h-3.5 w-3.5 shrink-0" />
+                ) : (
+                  <div className="bg-primary/60 h-2 w-2 shrink-0 animate-pulse rounded-full" />
+                )}
+                <span className={cn(!isDone && "italic")}>{step.label}</span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -378,59 +468,3 @@ export function AssistantMessageLoading({
   );
 }
 
-export function ThinkingIndicator({
-  thinkingSteps,
-}: {
-  thinkingSteps: ThinkingStep[];
-}) {
-  if (thinkingSteps.length === 0) {
-    return (
-      <div className="message-animate text-muted-foreground ml-11 flex items-center gap-2">
-        <div className="flex items-center gap-1">
-          <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full" />
-          <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full [animation-delay:0.2s]" />
-          <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full [animation-delay:0.4s]" />
-        </div>
-        <span className="text-sm italic">Thinking...</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="message-animate ml-11 flex flex-col gap-1.5">
-      {thinkingSteps.map((step, i) => {
-        const isDone = step.endedAt !== undefined;
-        const isLast = i === thinkingSteps.length - 1;
-        return (
-          <div
-            key={`${step.key}-${step.startedAt}`}
-            className="flex items-center gap-2"
-          >
-            {isDone ? (
-              <Check className="text-primary h-3.5 w-3.5 shrink-0" />
-            ) : (
-              <div
-                className={cn(
-                  "h-2 w-2 shrink-0 rounded-full",
-                  isLast
-                    ? "bg-primary/60 animate-pulse"
-                    : "bg-primary/40",
-                )}
-              />
-            )}
-            <span
-              className={cn(
-                "text-sm",
-                isDone
-                  ? "text-muted-foreground"
-                  : "text-muted-foreground italic",
-              )}
-            >
-              {step.label}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}

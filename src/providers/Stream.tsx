@@ -9,9 +9,19 @@ import React, {
   ReactNode,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
-import { type Message } from "@langchain/langgraph-sdk";
+import {
+  type Message,
+  type AIMessage,
+  type ToolMessage,
+} from "@langchain/langgraph-sdk";
 import { useQueryState } from "nuqs";
 import { useThreads } from "@/providers/Thread";
+import {
+  STEP_RUNNING_LABELS,
+  STEP_DONE_LABELS,
+  resolveToolActivity,
+  ACTIVITY_LABELS,
+} from "@/lib/activity-labels";
 
 // Best-effort: the standard LangGraph contract streams plain messages. These
 // extra fields (sources / follow-ups / debug / thinking steps) are only
@@ -92,6 +102,9 @@ export type ThinkingStep = {
   label: string;
   startedAt: number;
   endedAt?: number;
+  // Label to switch to when the step closes. Set for subagent-derived steps
+  // whose done label isn't in the event-keyed STEP_DONE_LABELS map.
+  doneLabel?: string;
 };
 
 export type ThinkingStepsEntry = {
@@ -116,16 +129,6 @@ const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
 const DEFAULT_API_URL = "/api";
 const DEFAULT_ASSISTANT_ID = "chat";
-
-// Running label while a step is open; done label once it closes.
-const STEP_RUNNING_LABELS: Record<string, string> = {
-  search: "Searching knowledge base...",
-  servicenow_delegating: "Searching ServiceNow tickets...",
-};
-const STEP_DONE_LABELS: Record<string, string> = {
-  search: "Searched knowledge base",
-  servicenow_delegating: "Searched ServiceNow tickets",
-};
 
 function normalizeApiUrl(value: string | undefined | null): string {
   const raw = (value || DEFAULT_API_URL).replace(/\/$/, "");
@@ -165,6 +168,128 @@ function lastAiMessageId(messages: Message[]): string | null {
     if (m?.type === "ai" && m.id) return m.id;
   }
   return null;
+}
+
+// Flatten an AI message's content into plain text (handles the string and the
+// array-of-content-blocks shapes) so we can tell when the agent is producing an
+// answer versus only calling tools.
+function messageText(content: Message["content"]): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((c) =>
+        typeof c === "string"
+          ? c
+          : c && typeof c === "object" && (c as { type?: string }).type === "text"
+            ? ((c as { text?: string }).text ?? "")
+            : "",
+      )
+      .join("");
+  }
+  return "";
+}
+
+// Derive activity steps from one turn's messages, so the user sees each thing
+// the agent actually did — for trust and transparency:
+//   • one step per tool call (ServiceNow / KB-subagent / any tool), running
+//     until its matching tool result arrives (matched by tool_call_id);
+//   • a "Generating response…" step while an answer message carries text.
+// `live` marks the tail message as still streaming (its generation step pulses);
+// pass false for settled/historical turns so every step reads as done.
+//
+// NOTE: this can only surface what the stream exposes. A single opaque tool call
+// (e.g. a subagent doing several internal operations) shows as ONE step until it
+// returns — deeper granularity requires the backend to stream those sub-steps as
+// custom events, which the event reducer below would then render.
+function deriveStepsFromTurn(turn: Message[], live: boolean): ThinkingStep[] {
+  const resultIds = new Set(
+    turn
+      .filter((m) => m.type === "tool")
+      .map((m) => (m as ToolMessage).tool_call_id)
+      .filter(Boolean),
+  );
+
+  const steps: ThinkingStep[] = [];
+  turn.forEach((m, idx) => {
+    if (m.type !== "ai") return;
+    const ai = m as AIMessage;
+    const isLastMsg = idx === turn.length - 1;
+
+    // One step per tool call.
+    for (const tc of ai.tool_calls ?? []) {
+      const activity = resolveToolActivity(tc);
+      if (!activity) continue;
+      const done = tc.id ? resultIds.has(tc.id) : false;
+      steps.push({
+        key: `tool:${tc.id ?? `${idx}:${tc.name}`}`,
+        label: done ? activity.done : activity.running,
+        doneLabel: activity.done,
+        startedAt: idx,
+        endedAt: done ? idx : undefined,
+      });
+    }
+
+    // Generation step when this message carries answer text. It's "running"
+    // only while live AND it's the tail message (still streaming); otherwise
+    // (earlier content, or any settled/historical turn) it reads as done.
+    if (messageText(ai.content).trim().length > 0) {
+      const running = live && isLastMsg;
+      steps.push({
+        key: `gen:${ai.id ?? idx}`,
+        label: running
+          ? ACTIVITY_LABELS.generating.running
+          : ACTIVITY_LABELS.generating.done,
+        doneLabel: ACTIVITY_LABELS.generating.done,
+        startedAt: idx + 0.5,
+        endedAt: running ? undefined : idx,
+      });
+    }
+  });
+  return steps;
+}
+
+// Live steps for the CURRENT (last) turn — messages after the last human msg.
+function deriveActivitySteps(messages: Message[]): ThinkingStep[] {
+  let start = 0;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.type === "human") {
+      start = i + 1;
+      break;
+    }
+  }
+  return deriveStepsFromTurn(messages.slice(start), true);
+}
+
+// Steps for a historical turn, keyed by its answer (AI) message id. Used to
+// rebuild the "Thought process" trace when an old thread is opened — the sealed
+// live trace only exists for turns run in the current session.
+export function deriveActivityStepsForAnswer(
+  messages: Message[],
+  answerId: string,
+): ThinkingStep[] {
+  const endIdx = messages.findIndex((m) => m.id === answerId);
+  if (endIdx < 0) return [];
+  let start = 0;
+  for (let i = endIdx - 1; i >= 0; i -= 1) {
+    if (messages[i]?.type === "human") {
+      start = i + 1;
+      break;
+    }
+  }
+  return deriveStepsFromTurn(messages.slice(start, endIdx + 1), false);
+}
+
+// Whether the given AI message is the last AI message of its turn (the answer),
+// i.e. the message that should host the trace disclosure.
+export function isTurnAnswer(messages: Message[], aiId: string): boolean {
+  const idx = messages.findIndex((m) => m.id === aiId);
+  if (idx < 0 || messages[idx].type !== "ai") return false;
+  for (let i = idx + 1; i < messages.length; i += 1) {
+    const t = messages[i]?.type;
+    if (t === "human") return true; // next turn started → this was the answer
+    if (t === "ai") return false; // a later AI message in the same turn exists
+  }
+  return true; // nothing after → last AI message
 }
 
 export const StreamProvider: React.FC<{ children: ReactNode }> = ({
@@ -262,22 +387,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
         return s;
       });
       setThinkingSteps([...pendingStepsRef.current]);
-    } else if (step === "servicenow_delegating") {
-      // Close any open step, then open the ServiceNow step.
-      pendingStepsRef.current = [
-        ...pendingStepsRef.current.map((s) =>
-          s.endedAt === undefined
-            ? { ...s, label: STEP_DONE_LABELS[s.key] ?? s.label, endedAt: now }
-            : s,
-        ),
-        {
-          key: "servicenow_delegating",
-          label: STEP_RUNNING_LABELS["servicenow_delegating"],
-          startedAt: now,
-        },
-      ];
-      setThinkingSteps([...pendingStepsRef.current]);
     }
+    // ServiceNow (and other subagent delegations) are surfaced from `task` tool
+    // calls via deriveActivitySteps, not custom events — see below.
     // --- End step timeline reducer ---
 
     if (Array.isArray(body.sources)) {
@@ -383,11 +495,21 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       });
 
       // Seal any open thinking step and commit the finished trace to the map.
-      if (pendingStepsRef.current.length && aiId) {
+      // Combine event-driven steps (search) with message-derived activity steps
+      // (tool calls + generation) from the current turn.
+      const combinedSteps = [
+        ...pendingStepsRef.current,
+        ...deriveActivitySteps(messages),
+      ];
+      if (combinedSteps.length && aiId) {
         const now = Date.now();
-        const sealedSteps = pendingStepsRef.current.map((s) =>
+        const sealedSteps = combinedSteps.map((s) =>
           s.endedAt === undefined
-            ? { ...s, label: STEP_DONE_LABELS[s.key] ?? s.label, endedAt: now }
+            ? {
+                ...s,
+                label: s.doneLabel ?? STEP_DONE_LABELS[s.key] ?? s.label,
+                endedAt: now,
+              }
             : s,
         );
         setThinkingStepsMap((prev) => ({
@@ -484,9 +606,22 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
   const error = errorOverride ?? (stream.error as Error | undefined);
 
+  // Live view of the trace: event-driven steps (search) plus message-derived
+  // activity steps (each tool call + the generation phase) for the current turn.
+  // While loading this drives the activity checklist; after finish index.tsx
+  // hides it and the sealed copy in thinkingStepsMap powers "Thought for Ns".
+  const activitySteps = useMemo(
+    () => deriveActivitySteps(stream.messages),
+    [stream.messages],
+  );
+  const mergedThinkingSteps = useMemo(
+    () => [...thinkingSteps, ...activitySteps],
+    [thinkingSteps, activitySteps],
+  );
+
   // Derived from the live step array so AssistantMessageLoading still gets a
   // subtitle string without any changes to its props.
-  const thinkingStep = thinkingSteps.at(-1)?.label ?? "";
+  const thinkingStep = mergedThinkingSteps.at(-1)?.label ?? "";
 
   const streamValue = useMemo<StreamContextType>(
     () => ({
@@ -499,7 +634,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       debugMap,
       followUpQuestions,
       thinkingStep,
-      thinkingSteps,
+      thinkingSteps: mergedThinkingSteps,
       thinkingStepsMap,
       lastDonePayload,
       streamingMessageId,
@@ -514,7 +649,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       debugMap,
       followUpQuestions,
       thinkingStep,
-      thinkingSteps,
+      mergedThinkingSteps,
       thinkingStepsMap,
       lastDonePayload,
       streamingMessageId,
