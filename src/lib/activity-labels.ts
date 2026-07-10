@@ -28,13 +28,11 @@ export const ACTIVITY_LABELS = {
   // Header used for historical turns where the duration isn't recoverable.
   thoughtProcess: "Thought process",
 
-  // Event-driven phases, keyed by backend step key.
-  steps: {
-    search: {
-      running: "Searching knowledge base…",
-      done: "Searched knowledge base",
-    },
-  },
+  // Event-driven phases, keyed by backend step key. Currently empty: the KB
+  // search is surfaced via the `ai_search_tool` tool call below (same operation),
+  // not a custom event, so it works in history too. Kept for any future
+  // event-only phase the backend might emit that has no tool call.
+  steps: {} as Record<string, { running: string; done: string }>,
 
   // Subagent-delegation phases, keyed by the `task` tool call's `subagent_type`.
   subagents: {
@@ -44,10 +42,24 @@ export const ACTIVITY_LABELS = {
     },
   } as Record<string, { running: string; done: string }>,
 
-  // Named labels for specific (non-subagent) tools, keyed by tool name. Any tool
-  // not listed here falls back to a humanized "Using <tool name>…" label so
-  // every tool the agent calls is surfaced to the user.
-  tools: {} as Record<string, { running: string; done: string }>,
+  // Named labels for specific (non-subagent) tools, keyed by the exact tool name
+  // the backend uses. Any tool not listed here falls back to a humanized
+  // "Using <Tool Name>…" label so every tool the agent calls is still surfaced.
+  //
+  // Convention for all labels: running = present-continuous + "…"; done = past
+  // tense; sentence case with proper acronyms (AI, KB, …).
+  tools: {
+    // The AI search tool IS the knowledge-base search (the backend also emits a
+    // `search` event for it, which we intentionally drop to avoid a duplicate).
+    ai_search_tool: {
+      running: "Searching knowledge base…",
+      done: "Searched knowledge base",
+    },
+    read_file: {
+      running: "Reading document…",
+      done: "Read document",
+    },
+  } as Record<string, { running: string; done: string }>,
 } as const;
 
 // Derived lookups keyed by step key — consumed by the step-timeline reducer.
@@ -59,14 +71,35 @@ export const STEP_DONE_LABELS: Record<string, string> = Object.fromEntries(
   Object.entries(ACTIVITY_LABELS.steps).map(([key, v]) => [key, v.done]),
 );
 
+// Common acronyms that should stay fully uppercased in humanized labels.
+const ACRONYMS: Record<string, string> = {
+  ai: "AI",
+  api: "API",
+  kb: "KB",
+  id: "ID",
+  url: "URL",
+  sql: "SQL",
+  ui: "UI",
+  faq: "FAQ",
+  pdf: "PDF",
+  crm: "CRM",
+};
+
 // Turn a raw tool / subagent identifier into a readable phrase, e.g.
-// "servicenow-ticket-agent" → "Servicenow Ticket Agent", "get_incident" →
-// "Get Incident".
+// "servicenow-ticket-agent" → "ServiceNow Ticket Agent", "ai_search_tool" →
+// "AI Search Tool", "get_incident" → "Get Incident".
 function humanize(name: string): string {
   return name
     .replace(/[-_]+/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .trim();
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => {
+      const lower = word.toLowerCase();
+      if (ACRONYMS[lower]) return ACRONYMS[lower];
+      if (lower === "servicenow") return "ServiceNow";
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(" ");
 }
 
 // Resolve the activity labels for ANY tool call so every tool the agent invokes

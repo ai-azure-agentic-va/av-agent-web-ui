@@ -17,7 +17,6 @@ import {
 import { useQueryState } from "nuqs";
 import { useThreads } from "@/providers/Thread";
 import {
-  STEP_RUNNING_LABELS,
   STEP_DONE_LABELS,
   resolveToolActivity,
   ACTIVITY_LABELS,
@@ -361,35 +360,13 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     }
 
     // --- Step timeline reducer ---
-    // Each recognised event either opens a new step or closes an existing one.
-    // pendingStepsRef is the source of truth; setThinkingSteps keeps the state
-    // in sync so React re-renders on every change.
-    const now = Date.now();
-    if (step === "search_start") {
-      // Close any open step, then open a new search step.
-      pendingStepsRef.current = [
-        ...pendingStepsRef.current.map((s) =>
-          s.endedAt === undefined
-            ? { ...s, label: STEP_DONE_LABELS[s.key] ?? s.label, endedAt: now }
-            : s,
-        ),
-        { key: "search", label: STEP_RUNNING_LABELS["search"], startedAt: now },
-      ];
-      setThinkingSteps([...pendingStepsRef.current]);
-    } else if (step === "search_complete") {
-      // Close the last open search step (don't open a new one).
-      let closed = false;
-      pendingStepsRef.current = pendingStepsRef.current.map((s) => {
-        if (!closed && s.key === "search" && s.endedAt === undefined) {
-          closed = true;
-          return { ...s, label: STEP_DONE_LABELS["search"] ?? s.label, endedAt: now };
-        }
-        return s;
-      });
-      setThinkingSteps([...pendingStepsRef.current]);
-    }
-    // ServiceNow (and other subagent delegations) are surfaced from `task` tool
-    // calls via deriveActivitySteps, not custom events — see below.
+    // All activity steps (KB / AI search, ServiceNow, other tools, generation)
+    // are now derived from the message stream via deriveActivitySteps, so they
+    // work live AND in chat history. The KB `search_start`/`search_complete`
+    // events were the SAME operation as the `ai_search_tool` tool call, so they
+    // are intentionally not turned into steps here to avoid a duplicate row.
+    // (This block is kept as the hook for any FUTURE event-only phases the
+    // backend might emit that have no corresponding tool call.)
     // --- End step timeline reducer ---
 
     if (Array.isArray(body.sources)) {
