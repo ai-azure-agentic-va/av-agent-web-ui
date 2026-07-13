@@ -24,7 +24,7 @@ import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { Bot, Check, ChevronRight } from "lucide-react";
 import { MessageFeedback } from "@/components/thread/feedback";
 import { DebugSection } from "./debug-section";
@@ -223,6 +223,15 @@ export function AssistantMessage({
     [contentString, sources],
   );
 
+  // Deferring the markdown source keeps the browser responsive while an answer
+  // streams: re-parsing the whole (growing) markdown every token is O(n) per
+  // token / O(n²) over the turn and runs synchronously, which otherwise
+  // saturates the main thread and freezes all input (e.g. the disclosure arrow).
+  // useDeferredValue renders the expensive markdown at low priority, so urgent
+  // updates — clicks, scrolling — can interrupt it. Settled messages are
+  // unaffected (their content never changes, so deferred === current).
+  const deferredContent = useDeferredValue(linkedContent);
+
 
   // The run_id for feedback comes from the `done` SSE event payload,
   // stored on lastDonePayload by Stream.tsx
@@ -310,7 +319,7 @@ export function AssistantMessage({
               <div className="prose prose-sm dark:prose-invert max-w-none">
                 {/* Render markdown live as tokens stream in, instead of showing
                     plain text and only formatting once the stream completes. */}
-                <MarkdownText>{linkedContent}</MarkdownText>
+                <MarkdownText>{deferredContent}</MarkdownText>
               </div>
             )}
 
@@ -387,7 +396,13 @@ function ThoughtDisclosure({
   durationSec?: number;
   live?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  // Sealed/historical disclosures own their expand state locally. The LIVE one
+  // reads/writes shared context state so it survives the host AI message changing
+  // mid-turn (each change would otherwise remount a fresh, collapsed disclosure).
+  const thread = useStreamContext();
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const expanded = live ? thread.liveThoughtExpanded : localExpanded;
+  const setExpanded = live ? thread.setLiveThoughtExpanded : setLocalExpanded;
 
   if (!steps.length) return null;
 
@@ -404,7 +419,24 @@ function ThoughtDisclosure({
   return (
     <div className="text-muted-foreground text-sm">
       <button
-        onClick={() => setExpanded((v) => !v)}
+        type="button"
+        // Toggle on pointer-down, not click: while the answer streams,
+        // StickToBottom auto-scrolls the list, which can move this button
+        // between mousedown and mouseup so the derived `click` is unreliable.
+        // pointer-down fires on press, immune to the element shifting. We do NOT
+        // also toggle on click — preventDefault here doesn't suppress the click,
+        // so a second toggle there would cancel this one out and look "stuck".
+        onPointerDown={(e) => {
+          e.preventDefault();
+          setExpanded(!expanded);
+        }}
+        // Keyboard equivalent (pointer-down doesn't fire for Enter/Space).
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setExpanded(!expanded);
+          }
+        }}
         className="hover:text-foreground flex items-center gap-1.5 transition-colors"
       >
         <ChevronRight

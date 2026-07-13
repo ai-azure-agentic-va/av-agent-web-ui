@@ -16,8 +16,8 @@ export const DEFAULT_SETTINGS: ChatSettings = {
   systemPrompt: "",
 };
 
-const STORAGE_KEY = "nfcu-chat-settings";
-export const SETTINGS_CHANGED_EVENT = "nfcu-settings-changed";
+const STORAGE_KEY = "va-chat-settings";
+export const SETTINGS_CHANGED_EVENT = "va-settings-changed";
 
 export function loadSettings(): ChatSettings {
   if (typeof window === "undefined") return { ...DEFAULT_SETTINGS };

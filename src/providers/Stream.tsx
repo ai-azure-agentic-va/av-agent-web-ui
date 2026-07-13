@@ -119,6 +119,9 @@ type StreamContextType = ReturnType<typeof useStream<StateType>> & {
   thinkingStep: string;
   thinkingSteps: ThinkingStep[];
   thinkingStepsMap: Record<string, ThinkingStepsEntry>;
+  // Expand/collapse state for the LIVE activity disclosure. 
+  liveThoughtExpanded: boolean;
+  setLiveThoughtExpanded: (expanded: boolean) => void;
   lastDonePayload: unknown;
   streamingMessageId: string | null;
   stop: () => void;
@@ -188,8 +191,7 @@ function messageText(content: Message["content"]): string {
   return "";
 }
 
-// Derive activity steps from one turn's messages, so the user sees each thing
-// the agent actually did — for trust and transparency:
+// Derive activity steps from one turn's messages, for trust and transparency:
 //   • one step per tool call (ServiceNow / KB-subagent / any tool), running
 //     until its matching tool result arrives (matched by tool_call_id);
 //   • a "Generating response…" step while an answer message carries text.
@@ -278,6 +280,24 @@ export function deriveActivityStepsForAnswer(
   return deriveStepsFromTurn(messages.slice(start, endIdx + 1), false);
 }
 
+// Combine event-driven steps (the ONLY live signal for a blocking subagent
+// delegation) with message-derived steps, dropping any event step that a
+// message-derived step already represents — matched by doneLabel, since both
+// describe the same operation. This keeps the live "Searching ServiceNow
+// tickets…" indicator while the parent graph blocks, then lets the
+// message-derived row supersede it once the delegation's tool call/result land,
+// so the sealed/expanded trace never shows a duplicate.
+function mergeStepSources(
+  eventSteps: ThinkingStep[],
+  messageSteps: ThinkingStep[],
+): ThinkingStep[] {
+  const covered = new Set(messageSteps.map((s) => s.doneLabel ?? s.label));
+  const keptEvents = eventSteps.filter(
+    (s) => !covered.has(s.doneLabel ?? s.label),
+  );
+  return [...keptEvents, ...messageSteps];
+}
+
 // Whether the given AI message is the last AI message of its turn (the answer),
 // i.e. the message that should host the trace disclosure.
 export function isTurnAnswer(messages: Message[], aiId: string): boolean {
@@ -307,6 +327,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const [customFollowUps, setCustomFollowUps] = useState<string[]>([]);
   const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
   const [thinkingStepsMap, setThinkingStepsMap] = useState<Record<string, ThinkingStepsEntry>>({});
+  const [liveThoughtExpanded, setLiveThoughtExpanded] = useState(false);
   const [lastDonePayload, setLastDonePayload] = useState<unknown>(null);
   const [errorOverride, setErrorOverride] = useState<Error | undefined>();
   const [stopped, setStopped] = useState(false);
@@ -360,13 +381,20 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     }
 
     // --- Step timeline reducer ---
-    // All activity steps (KB / AI search, ServiceNow, other tools, generation)
-    // are now derived from the message stream via deriveActivitySteps, so they
-    // work live AND in chat history. The KB `search_start`/`search_complete`
-    // events were the SAME operation as the `ai_search_tool` tool call, so they
-    // are intentionally not turned into steps here to avoid a duplicate row.
-    // (This block is kept as the hook for any FUTURE event-only phases the
-    // backend might emit that have no corresponding tool call.)
+    
+    if (step === "servicenow_delegating") {
+      const labels = ACTIVITY_LABELS.subagents["servicenow-ticket-agent"];
+      const key = "subagent:servicenow-ticket-agent";
+      if (labels && !pendingStepsRef.current.some((s) => s.key === key)) {
+        const next: ThinkingStep[] = [
+          ...pendingStepsRef.current,
+          { key, label: labels.running, doneLabel: labels.done, startedAt: 0 },
+        ];
+        pendingStepsRef.current = next;
+        setThinkingSteps(next);
+      }
+      return;
+    }
     // --- End step timeline reducer ---
 
     if (Array.isArray(body.sources)) {
@@ -442,10 +470,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
         pendingSteps: pendingStepsRef.current.length,
         fromState: lastAiMessageId(messages),
       });
-
-      // When `sources_final` arrived it is authoritative: use the pending list
-      // verbatim (an empty list means the answer cited nothing → no panel).
-      // Otherwise fall back to whatever accumulated, then to graph state.
       const sources = sourcesFinalRef.current
         ? pendingSourcesRef.current
         : (pendingSourcesRef.current ??
@@ -474,10 +498,10 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       // Seal any open thinking step and commit the finished trace to the map.
       // Combine event-driven steps (search) with message-derived activity steps
       // (tool calls + generation) from the current turn.
-      const combinedSteps = [
-        ...pendingStepsRef.current,
-        ...deriveActivitySteps(messages),
-      ];
+      const combinedSteps = mergeStepSources(
+        pendingStepsRef.current,
+        deriveActivitySteps(messages),
+      );
       if (combinedSteps.length && aiId) {
         const now = Date.now();
         const sealedSteps = combinedSteps.map((s) =>
@@ -592,7 +616,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     [stream.messages],
   );
   const mergedThinkingSteps = useMemo(
-    () => [...thinkingSteps, ...activitySteps],
+    () => mergeStepSources(thinkingSteps, activitySteps),
     [thinkingSteps, activitySteps],
   );
 
@@ -613,6 +637,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       thinkingStep,
       thinkingSteps: mergedThinkingSteps,
       thinkingStepsMap,
+      liveThoughtExpanded,
+      setLiveThoughtExpanded,
       lastDonePayload,
       streamingMessageId,
     }),
@@ -628,6 +654,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       thinkingStep,
       mergedThinkingSteps,
       thinkingStepsMap,
+      liveThoughtExpanded,
       lastDonePayload,
       streamingMessageId,
     ],
