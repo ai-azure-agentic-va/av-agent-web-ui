@@ -9,6 +9,7 @@ import React, {
   ReactNode,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
+import { parsePartialJson } from "@langchain/core/output_parsers";
 import {
   type Message,
   type AIMessage,
@@ -202,6 +203,55 @@ function messageText(content: Message["content"]): string {
 // (e.g. a subagent doing several internal operations) shows as ONE step until it
 // returns — deeper granularity requires the backend to stream those sub-steps as
 // custom events, which the event reducer below would then render.
+// Collect an AI message's tool calls from BOTH the structured `tool_calls`
+// field AND Anthropic `tool_use` content blocks (deduped by id). The tool-call
+// box renders from both; during streaming the call often lives only in the
+// content blocks while `tool_calls` is still empty, so reading `tool_calls`
+// alone would miss the live activity step even though the box shows the call.
+function toolCallsOf(
+  ai: AIMessage,
+): Array<{ id?: string; name?: string; args?: Record<string, unknown> }> {
+  const out: Array<{
+    id?: string;
+    name?: string;
+    args?: Record<string, unknown>;
+  }> = [];
+  const seen = new Set<string>();
+
+  for (const tc of ai.tool_calls ?? []) {
+    if (tc.id) seen.add(tc.id);
+    out.push({
+      id: tc.id,
+      name: tc.name,
+      args: tc.args as Record<string, unknown>,
+    });
+  }
+
+  const content = ai.content;
+  if (Array.isArray(content)) {
+    for (const c of content) {
+      if (!c || typeof c !== "object") continue;
+      if ((c as { type?: string }).type !== "tool_use") continue;
+      const block = c as { id?: string; name?: string; input?: unknown };
+      if (block.id && seen.has(block.id)) continue;
+      let args: Record<string, unknown> = {};
+      if (block.input && typeof block.input === "object") {
+        args = block.input as Record<string, unknown>;
+      } else if (typeof block.input === "string") {
+        try {
+          args = (parsePartialJson(block.input) as Record<string, unknown>) ?? {};
+        } catch {
+          // Partial JSON mid-stream — args fill in on a later render.
+        }
+      }
+      if (block.id) seen.add(block.id);
+      out.push({ id: block.id, name: block.name, args });
+    }
+  }
+
+  return out;
+}
+
 function deriveStepsFromTurn(turn: Message[], live: boolean): ThinkingStep[] {
   const resultIds = new Set(
     turn
@@ -216,8 +266,8 @@ function deriveStepsFromTurn(turn: Message[], live: boolean): ThinkingStep[] {
     const ai = m as AIMessage;
     const isLastMsg = idx === turn.length - 1;
 
-    // One step per tool call.
-    for (const tc of ai.tool_calls ?? []) {
+    // One step per tool call (from structured tool_calls + tool_use blocks).
+    for (const tc of toolCallsOf(ai)) {
       const activity = resolveToolActivity(tc);
       if (!activity) continue;
       const done = tc.id ? resultIds.has(tc.id) : false;
