@@ -96,19 +96,18 @@ async function handleRequest(
 
     const isEventStream = res.headers.get("content-type")?.includes("text/event-stream");
 
-    const responseHeaders: Record<string, string> = {
-      ...Object.fromEntries(res.headers.entries()),
-      ...getCorsHeaders(),
-    };
+    const responseHeaders = new Headers(res.headers);
+    responseHeaders.set("Access-Control-Allow-Origin", "*");
+    responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    responseHeaders.set("Access-Control-Allow-Headers", "*");
 
     if (isEventStream) {
-      responseHeaders["Content-Type"] = "text/event-stream";
-      responseHeaders["Cache-Control"] = "no-cache, no-transform";
-      responseHeaders["Connection"] = "keep-alive";
-      responseHeaders["X-Accel-Buffering"] = "no";
-      // Remove transfer-encoding and content-length which can cause buffering
-      delete responseHeaders["content-length"];
-      delete responseHeaders["transfer-encoding"];
+      responseHeaders.set("Content-Type", "text/event-stream");
+      responseHeaders.set("Cache-Control", "no-cache, no-transform");
+      responseHeaders.set("Connection", "keep-alive");
+      responseHeaders.set("X-Accel-Buffering", "no");
+      responseHeaders.delete("Content-Length");
+      responseHeaders.delete("Transfer-Encoding");
     }
 
     return new NextResponse(res.body, {
