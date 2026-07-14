@@ -1,0 +1,36 @@
+services:
+  # ---------------------------------------------------------------------------
+  # Open Web UI — Next.js frontend
+  # Accessible at http://localhost:3000
+  #
+  # Quick start (auth bypassed, no backend required):
+  #   docker compose up --build
+  #
+  # With a real backend, set PARENT_AGENT_API_URL in .env to point at it.
+  # ---------------------------------------------------------------------------
+  open-web-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* are baked into the client bundle at build time.
+        # /api means the browser talks to this Next.js server, which proxies
+        # all /api/* requests to PARENT_AGENT_API_URL server-side.
+        NEXT_PUBLIC_API_URL: /api
+        NEXT_PUBLIC_ASSISTANT_ID: chat
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      # Force port 3000 inside the container — overrides PORT=8081 in .env
+      PORT: "3000"
+      # Override AUTH_URL so OAuth callbacks resolve correctly in Docker.
+      AUTH_URL: http://localhost:3000
+      # Set to "true" to bypass Entra ID SSO for local testing.
+      DISABLE_AUTH: "false"
+      # Point at a backend running on your host machine.
+      # host.docker.internal resolves to the host from inside Docker Desktop.
+      # Change this to your actual backend URL when available.
+      PARENT_AGENT_API_URL: http://host.docker.internal:8080
+    restart: unless-stopped
