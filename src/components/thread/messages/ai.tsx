@@ -1,5 +1,10 @@
 import { parsePartialJson } from "@langchain/core/output_parsers";
-import { useStreamContext } from "@/providers/Stream";
+import {
+  useStreamContext,
+  ThinkingStep,
+  deriveActivityStepsForAnswer,
+  isTurnAnswer,
+} from "@/providers/Stream";
 import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
 import {
   getContentString,
@@ -19,10 +24,11 @@ import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
-import { useMemo } from "react";
-import { Bot } from "lucide-react";
+import { useDeferredValue, useMemo, useState } from "react";
+import { Bot, Check, ChevronRight } from "lucide-react";
 import { MessageFeedback } from "@/components/thread/feedback";
 import { DebugSection } from "./debug-section";
+import { ACTIVITY_LABELS } from "@/lib/activity-labels";
 
 function CustomComponent({
   message,
@@ -170,6 +176,50 @@ export function AssistantMessage({
   const sources = message?.id ? thread.sourcesMap?.[message.id] : undefined;
   const debug = message?.id ? thread.debugMap?.[message.id] : undefined;
 
+  // Host the LIVE activity disclosure on the current turn's last AI message, so
+  // it sits on top of the streaming answer in the same slot the settled "Thought
+  // for Ns" disclosure will occupy — no position jump when the run finishes.
+  const lastAiId = useMemo(() => {
+    // Only needed while streaming; skip the scan on settled threads.
+    if (!thread.isLoading) return null;
+    const msgs = thread.messages;
+    for (let i = msgs.length - 1; i >= 0; i -= 1) {
+      if (msgs[i]?.type === "ai" && msgs[i]?.id) return msgs[i].id;
+    }
+    return null;
+  }, [thread.messages, thread.isLoading]);
+  const showLiveThought =
+    thread.isLoading &&
+    message?.id === lastAiId &&
+    thread.thinkingSteps.length > 0;
+
+  // For every COMPLETED turn (this session or opened from history), rebuild the
+  // trace on demand from the turn's messages + their checkpoint timestamps. This
+  // is consistent everywhere (durations come from created_at) and needs no
+  // sealed session state. Only host it on the turn's answer message.
+  const historicalSteps = useMemo(() => {
+    if (
+      isToolResult ||
+      showLiveThought ||
+      !message?.id ||
+      !isTurnAnswer(thread.messages, message.id)
+    ) {
+      return null;
+    }
+    const steps = deriveActivityStepsForAnswer(
+      thread.messages,
+      message.id,
+      thread.messageTimes,
+    );
+    return steps.length ? steps : null;
+  }, [
+    isToolResult,
+    showLiveThought,
+    message?.id,
+    thread.messages,
+    thread.messageTimes,
+  ]);
+
   // Citation-linked markdown source. Memoized so the regex linkify only re-runs
   // when this message's content or its sources change — not every render of an
   // unrelated streaming turn. During streaming `sources` is empty, so this is
@@ -178,6 +228,15 @@ export function AssistantMessage({
     () => linkifyCitations(contentString, sources),
     [contentString, sources],
   );
+
+  // Deferring the markdown source keeps the browser responsive while an answer
+  // streams: re-parsing the whole (growing) markdown every token is O(n) per
+  // token / O(n²) over the turn and runs synchronously, which otherwise
+  // saturates the main thread and freezes all input (e.g. the disclosure arrow).
+  // useDeferredValue renders the expensive markdown at low priority, so urgent
+  // updates — clicks, scrolling — can interrupt it. Settled messages are
+  // unaffected (their content never changes, so deferred === current).
+  const deferredContent = useDeferredValue(linkedContent);
 
 
   // The run_id for feedback comes from the `done` SSE event payload,
@@ -211,7 +270,9 @@ export function AssistantMessage({
     !(sources && sources.length > 0) &&
     !debug &&
     !interruptVisible &&
-    !customComponents?.length
+    !customComponents?.length &&
+    !showLiveThought &&
+    !historicalSteps
   ) {
     return null;
   }
@@ -242,11 +303,17 @@ export function AssistantMessage({
           </>
         ) : (
           <>
+            {showLiveThought ? (
+              <ThoughtDisclosure steps={thread.thinkingSteps} live />
+            ) : historicalSteps ? (
+              <ThoughtDisclosure steps={historicalSteps} />
+            ) : null}
+
             {contentString.length > 0 && (
               <div className="prose prose-sm dark:prose-invert max-w-none">
                 {/* Render markdown live as tokens stream in, instead of showing
                     plain text and only formatting once the stream completes. */}
-                <MarkdownText>{linkedContent}</MarkdownText>
+                <MarkdownText>{deferredContent}</MarkdownText>
               </div>
             )}
 
@@ -309,6 +376,127 @@ export function AssistantMessage({
   );
 }
 
+// A single collapsed disclosure anchored on top of the assistant answer. It is
+// shown BOTH while the turn is generating (live: header = current activity, e.g.
+// "Searching ServiceNow tickets…", with a pulse) and after it finishes (sealed:
+// header = "Thought for Ns"). Rendering it in the same slot in both states is
+// what stops the old "jump" where the trace only appeared after generation.
+function ThoughtDisclosure({
+  steps,
+  live = false,
+}: {
+  steps: ThinkingStep[];
+  live?: boolean;
+}) {
+  // Settled/historical disclosures own their expand state locally. The LIVE one
+  // reads/writes shared context state so it survives the host AI message changing
+  // mid-turn (each change would otherwise remount a fresh, collapsed disclosure).
+  const thread = useStreamContext();
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const expanded = live ? thread.liveThoughtExpanded : localExpanded;
+  const setExpanded = live ? thread.setLiveThoughtExpanded : setLocalExpanded;
+
+  if (!steps.length) return null;
+
+  // Total = sum of per-activity durations, so the collapsed header and the
+  // expanded breakdown always reconcile (the "Thinking" gap steps make the
+  // per-activity durations tile the whole turn).
+  const totalMs = steps.reduce((acc, s) => acc + (s.durationMs ?? 0), 0);
+  const hasDurations = steps.some((s) => s.durationMs != null);
+
+  // While live, prefer the currently-open step's label; if all steps have
+  // closed (e.g. search finished and the answer is now streaming), fall back to
+  // the generic working label.
+  const openStep = steps.find((s) => s.endedAt === undefined);
+  const headerLabel = live
+    ? (openStep?.label ?? ACTIVITY_LABELS.working)
+    : hasDurations
+      ? `${ACTIVITY_LABELS.thoughtPrefix} ${Math.max(1, Math.round(totalMs / 1000))}${ACTIVITY_LABELS.thoughtSuffix}`
+      : ACTIVITY_LABELS.thoughtProcess;
+
+  return (
+    <div className="text-muted-foreground text-sm">
+      <button
+        type="button"
+        // Toggle on pointer-down, not click: while the answer streams,
+        // StickToBottom auto-scrolls the list, which can move this button
+        // between mousedown and mouseup so the derived `click` is unreliable.
+        // pointer-down fires on press, immune to the element shifting. We do NOT
+        // also toggle on click — preventDefault here doesn't suppress the click,
+        // so a second toggle there would cancel this one out and look "stuck".
+        onPointerDown={(e) => {
+          e.preventDefault();
+          setExpanded(!expanded);
+        }}
+        // Keyboard equivalent (pointer-down doesn't fire for Enter/Space).
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setExpanded(!expanded);
+          }
+        }}
+        className="hover:text-foreground flex items-center gap-1.5 transition-colors"
+      >
+        <ChevronRight
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 transition-transform",
+            expanded && "rotate-90",
+          )}
+        />
+        {live && (
+          <span className="bg-primary/60 h-1.5 w-1.5 shrink-0 animate-pulse rounded-full" />
+        )}
+        <span className={cn(live && "italic")}>{headerLabel}</span>
+      </button>
+      {expanded && (
+        <div className="mt-2 flex flex-col gap-1.5 pl-1">
+          {steps.map((step) => {
+            const isDone = step.endedAt !== undefined;
+            const isGap = step.key.startsWith("think:");
+            // Per-activity duration (from created_at).
+            const stepSec =
+              step.durationMs !== undefined
+                ? Math.max(1, Math.round(step.durationMs / 1000))
+                : null;
+            return (
+              <div
+                key={`${step.key}-${step.startedAt}`}
+                className="flex items-center gap-2"
+              >
+                {isGap ? (
+                  // Reasoning gap — neutral marker, not a task checkmark.
+                  // Pulses while the gap is still in progress (live thinking).
+                  <div
+                    className={cn(
+                      "border-muted-foreground/50 h-2 w-2 shrink-0 rounded-full border",
+                      !isDone && "bg-muted-foreground/40 animate-pulse",
+                    )}
+                  />
+                ) : isDone ? (
+                  <Check className="text-primary h-3.5 w-3.5 shrink-0" />
+                ) : (
+                  <div className="bg-primary/60 h-2 w-2 shrink-0 animate-pulse rounded-full" />
+                )}
+                <span
+                  className={cn((!isDone || isGap) && "text-muted-foreground")}
+                >
+                  {step.label}
+                </span>
+                {stepSec != null && (
+                  <span className="text-muted-foreground/70 text-xs">
+                    · {ACTIVITY_LABELS.thoughtPrefix} {stepSec}
+                    {ACTIVITY_LABELS.thoughtSuffix}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AssistantMessageLoading({
   thinkingStep,
 }: {
@@ -335,15 +523,3 @@ export function AssistantMessageLoading({
   );
 }
 
-export function ThinkingIndicator() {
-  return (
-    <div className="message-animate text-muted-foreground ml-11 flex items-center gap-2">
-      <div className="flex items-center gap-1">
-        <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full" />
-        <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full [animation-delay:0.2s]" />
-        <div className="bg-primary/60 h-1.5 w-1.5 animate-pulse rounded-full [animation-delay:0.4s]" />
-      </div>
-      <span className="text-sm italic">Thinking...</span>
-    </div>
-  );
-}
