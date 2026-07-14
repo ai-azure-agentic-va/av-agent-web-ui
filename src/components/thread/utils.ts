@@ -66,8 +66,16 @@ export function linkifyCitations(
   // text rather than dropped, so any model/backend mismatch degrades gracefully.
   return content.replace(/\[(\d{1,3})\]/g, (match, num) => {
     const url = urlByIndex.get(Number(num));
+    if (!url) return match;
+    // SharePoint/OneDrive URLs contain spaces (e.g. "/Shared Documents/") and
+    // parentheses, which BREAK a bare markdown destination `(url)` — CommonMark
+    // aborts the link and leaves the raw `[[n]](url)` in the text. Wrap the
+    // destination in <> (an angle-bracket destination may contain spaces and
+    // parens) and %20-encode spaces for a clean href; escape the only chars
+    // that would break the <> form itself.
+    const safeUrl = url.replace(/[<>]/g, encodeURIComponent).replace(/ /g, "%20");
     // Escaped inner brackets so the link text renders as literal "[n]".
-    return url ? `[\\[${num}\\]](${url})` : match;
+    return `[\\[${num}\\]](<${safeUrl}>)`;
   });
 }
 
