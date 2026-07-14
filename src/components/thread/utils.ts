@@ -48,23 +48,22 @@ export function extractFollowUps(content: string): string[] {
 
 /**
  * Turn inline `[n]` citation markers in the answer into clickable links to the
- * corresponding source URL, so a user can click the citation in the text. Markers
- * with no matching source (or no URL) are left as plain text.
+ * matching document in the "Documents Analyzed" list (by its backend-assigned
+ * `index`). Markers with no matching document (or no URL) are left as plain text.
  */
 export function linkifyCitations(
   content: string,
-  sources?: { index?: number; url?: string }[],
+  documents?: { index?: number; url?: string }[],
 ): string {
-  if (!content || !sources || sources.length === 0) return content;
+  if (!content || !documents || documents.length === 0) return content;
   const urlByIndex = new Map<number, string>();
-  sources.forEach((s, i) => {
-    const idx = s.index ?? i + 1;
-    if (s.url) urlByIndex.set(idx, s.url);
+  documents.forEach((d, i) => {
+    const idx = d.index ?? i + 1;
+    if (d.url) urlByIndex.set(idx, d.url);
   });
   if (urlByIndex.size === 0) return content;
-  // Match any marker number; an `[n]` with no matching source is left as plain
-  // text rather than dropped, so accumulated indices beyond the small range and
-  // any model/backend mismatch degrade gracefully.
+  // Match any marker number; an `[n]` with no matching document is left as plain
+  // text rather than dropped, so any model/backend mismatch degrades gracefully.
   return content.replace(/\[(\d{1,3})\]/g, (match, num) => {
     const url = urlByIndex.get(Number(num));
     // Escaped inner brackets so the link text renders as literal "[n]".
