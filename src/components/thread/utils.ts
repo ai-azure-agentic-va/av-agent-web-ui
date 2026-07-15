@@ -48,7 +48,7 @@ export function extractFollowUps(content: string): string[] {
 
 /**
  * Turn inline `[n]` citation markers in the answer into clickable links to the
- * matching document in the "Documents Analyzed" list (by its backend-assigned
+ * matching document in the "Referenced Sources" list (by its backend-assigned
  * `index`). Markers with no matching document (or no URL) are left as plain text.
  */
 export function linkifyCitations(

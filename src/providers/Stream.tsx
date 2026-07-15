@@ -37,7 +37,7 @@ export type StateType = {
 
 // One document (its chunks collapsed) that AI Search retrieved this turn. The
 // backend numbers these 1..n and streams the full retrieved set via the
-// `documents` custom event; the UI renders them as "Documents Analyzed" and
+// `documents` custom event; the UI renders them as "Referenced Sources" and
 // links inline [n] citation markers to the matching entry.
 export type AnalyzedDocument = {
   index?: number;
@@ -420,7 +420,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     // `documents` carries the FULL set of documents AI Search retrieved this
     // turn (every search's hits, cited or not), already numbered 1..n by the
     // backend. Each event is the whole accumulated list, so we just replace —
-    // no merge/accumulation. Rendered later as "Documents Analyzed".
+    // no merge/accumulation. Rendered later as "Referenced Sources".
     if (step === "documents") {
       if (Array.isArray(body.documents)) {
         pendingDocumentsRef.current = (body.documents as AnalyzedDocument[])

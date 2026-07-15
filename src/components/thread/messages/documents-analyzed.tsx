@@ -9,7 +9,7 @@ function formatModified(value?: string): string | null {
 }
 
 /**
- * "Documents Analyzed" — every document AI Search retrieved for this answer
+ * "Referenced Sources" — every document AI Search retrieved for this answer
  * (chunks collapsed to documents), numbered 1..n by the backend. Inline [n]
  * citation markers in the answer link to the matching entry here. Shown for all
  * retrieved documents, whether or not the answer cited them.
@@ -23,7 +23,7 @@ export function DocumentsAnalyzed({
 
   return (
     <div className="border-border mt-3 border-t pt-3 text-sm">
-      <p className="text-foreground mb-1.5 font-semibold">Documents Analyzed:</p>
+      <p className="text-foreground mb-1.5 font-semibold">Referenced Sources:</p>
       <ol className="space-y-1">
         {documents.map((doc, i) => {
           const idx = doc.index ?? i + 1;
