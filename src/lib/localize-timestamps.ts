@@ -27,11 +27,25 @@ export function toUtcIso(dateStr: string, timeStr: string): string {
   return `${dateStr}T${time}Z`;
 }
 
+// `Intl` in en-US/en-CA renders zones outside North America as a bare GMT offset
+// (e.g. Asia/Kolkata -> "GMT+5:30") because their letter abbreviation is
+// ambiguous in North-American English (IST = India / Israel / Irish Standard
+// Time), so CLDR only ships abbreviations for a subset of zones — only a
+// region locale like en-IN yields "IST". For the zones our users actually sit
+// in — keyed by IANA name, which is unambiguous — we prefer the abbreviation
+// they expect. Only DST-free zones belong here: a fixed abbreviation would be
+// wrong half the year for a DST zone, so those keep the always-correct GMT
+// offset that Intl returns. Extend this map as more user zones come up.
+const ZONE_ABBREVIATION_OVERRIDES: Record<string, string> = {
+  "Asia/Kolkata": "IST", // India Standard Time — India observes no DST
+  "Asia/Calcutta": "IST", // legacy IANA alias for Asia/Kolkata
+};
+
 /**
  * Format an instant in the viewer's local timezone as "YYYY-MM-DD HH:MM:SS TZ"
- * — mirrors the backend's numeric layout, just localized (e.g. "… EDT").
- * `timeZone` is exposed for deterministic tests; production omits it so the
- * browser's own zone is used.
+ * — mirrors the backend's numeric layout, just localized (e.g. "… EDT",
+ * "… IST"). `timeZone` is exposed for deterministic tests; production omits it
+ * so the browser's own zone is used.
  */
 export function formatLocalTimestamp(date: Date, timeZone?: string): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -48,7 +62,14 @@ export function formatLocalTimestamp(date: Date, timeZone?: string): string {
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   // en-CA + hour12:false can emit "24" for midnight in some engines — normalize.
   const hour = get("hour") === "24" ? "00" : get("hour");
-  return `${get("year")}-${get("month")}-${get("day")} ${hour}:${get("minute")}:${get("second")} ${get("timeZoneName")}`;
+  // Prefer a friendly abbreviation for a zone Intl would otherwise show as a raw
+  // GMT offset; fall back to Intl's value (a real abbrev like EDT, or the GMT
+  // offset — always correct) for any zone not in the override map.
+  const resolvedZone =
+    timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const tzName =
+    ZONE_ABBREVIATION_OVERRIDES[resolvedZone] ?? get("timeZoneName");
+  return `${get("year")}-${get("month")}-${get("day")} ${hour}:${get("minute")}:${get("second")} ${tzName}`;
 }
 
 // --- rehype plugin ---------------------------------------------------------
