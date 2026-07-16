@@ -17,11 +17,7 @@ import {
 } from "@langchain/langgraph-sdk";
 import { useQueryState } from "nuqs";
 import { useThreads } from "@/providers/Thread";
-import {
-  STEP_DONE_LABELS,
-  resolveToolActivity,
-  ACTIVITY_LABELS,
-} from "@/lib/activity-labels";
+import { resolveToolActivity, ACTIVITY_LABELS } from "@/lib/activity-labels";
 
 // Best-effort: the standard LangGraph contract streams plain messages. These
 // extra fields (sources / follow-ups / debug / thinking steps) are only
@@ -100,20 +96,18 @@ export type DebugPayload = {
   settings?: Record<string, unknown>;
 };
 
+// One activity in the trace: a tool call, the generation phase, or a "Thinking"
+// gap between them. `startedAt`/`endedAt` are order indices (React keys +
+// done-state), NOT timestamps; real duration is `durationMs`.
 export type ThinkingStep = {
   key: string;
   label: string;
   startedAt: number;
-  endedAt?: number;
-  // Label to switch to when the step closes. Set for subagent-derived steps
-  // whose done label isn't in the event-keyed STEP_DONE_LABELS map.
-  doneLabel?: string;
-};
-
-export type ThinkingStepsEntry = {
-  steps: ThinkingStep[];
-  turnStartedAt: number;
-  turnEndedAt: number;
+  endedAt?: number; // set once the step is done (undefined while running)
+  doneLabel?: string; // label to show once the step closes
+  // Duration in ms. Comes from checkpoint `created_at` for settled/history
+  // turns (accurate) and from an observed wall-clock estimate while live.
+  durationMs?: number;
 };
 
 type StreamContextType = ReturnType<typeof useStream<StateType>> & {
@@ -122,8 +116,10 @@ type StreamContextType = ReturnType<typeof useStream<StateType>> & {
   followUpQuestions: string[];
   thinkingStep: string;
   thinkingSteps: ThinkingStep[];
-  thinkingStepsMap: Record<string, ThinkingStepsEntry>;
-  // Expand/collapse state for the LIVE activity disclosure. 
+  // Per-message checkpoint timestamps (created_at, epoch ms) — the source of
+  // activity durations for both live and history turns.
+  messageTimes: MessageTimes;
+  // Expand/collapse state for the LIVE activity disclosure.
   liveThoughtExpanded: boolean;
   setLiveThoughtExpanded: (expanded: boolean) => void;
   lastDonePayload: unknown;
@@ -255,37 +251,91 @@ function toolCallsOf(
   return out;
 }
 
-function deriveStepsFromTurn(turn: Message[], live: boolean): ThinkingStep[] {
-  const resultIds = new Set(
-    turn
-      .filter((m) => m.type === "tool")
-      .map((m) => (m as ToolMessage).tool_call_id)
-      .filter(Boolean),
-  );
+// messageId → checkpoint created_at (epoch ms). Timings come from the data
+// (checkpoint timestamps), so they're accurate regardless of SSE buffering and
+// work identically live, in prod, and from chat history.
+export type MessageTimes = Map<string, number>;
+
+const MIN_GAP_MS = 1000; // ignore sub-second reasoning gaps as display noise
+
+// Derive a turn's activity steps as a chronological tiling that SUMS TO THE
+// TOTAL: a "Thinking" gap for each reasoning pause, then one step per tool call
+// (its start→result), then a generation step (last result→answer). Durations
+// come from `created_at` (via `times`); `turnStartMs` is the human message's
+// timestamp so the initial "Thinking" gap is included. `live` marks the tail
+// generation step as still streaming.
+function deriveStepsFromTurn(
+  turn: Message[],
+  times: MessageTimes,
+  turnStartMs: number | undefined,
+  live: boolean,
+): ThinkingStep[] {
+  const resultDone = new Set<string>();
+  const resultTime = new Map<string, number | undefined>();
+  for (const m of turn) {
+    if (m.type === "tool" && (m as ToolMessage).tool_call_id) {
+      const id = (m as ToolMessage).tool_call_id as string;
+      resultDone.add(id);
+      resultTime.set(id, m.id ? times.get(m.id) : undefined);
+    }
+  }
 
   const steps: ThinkingStep[] = [];
+  let order = 0;
+  let cursor = turnStartMs; // running boundary in ms
+
+  const gapTo = (endMs: number | undefined) => {
+    const known = cursor != null && endMs != null;
+    // Emit a Thinking gap when the timing is unknown (live: show the phase with
+    // no number, so gaps appear during the run before created_at exists) OR when
+    // it's a meaningful measured gap (>=1s). Sub-second measured gaps are dropped
+    // as noise — this keeps the settled/history view unchanged.
+    if (!known || endMs! - cursor! >= MIN_GAP_MS) {
+      steps.push({
+        key: `think:${order}`,
+        label: ACTIVITY_LABELS.thinking,
+        doneLabel: ACTIVITY_LABELS.thinking,
+        startedAt: order,
+        endedAt: order,
+        durationMs: known ? Math.max(0, endMs! - cursor!) : undefined,
+      });
+    }
+    order += 1;
+  };
+
   turn.forEach((m, idx) => {
     if (m.type !== "ai") return;
     const ai = m as AIMessage;
+    const aiTime = ai.id ? times.get(ai.id) : undefined;
     const isLastMsg = idx === turn.length - 1;
+    const toolCalls = toolCallsOf(ai);
 
-    // One step per tool call (from structured tool_calls + tool_use blocks).
-    for (const tc of toolCallsOf(ai)) {
-      const activity = resolveToolActivity(tc);
-      if (!activity) continue;
-      const done = tc.id ? resultIds.has(tc.id) : false;
-      steps.push({
-        key: `tool:${tc.id ?? `${idx}:${tc.name}`}`,
-        label: done ? activity.done : activity.running,
-        doneLabel: activity.done,
-        startedAt: idx,
-        endedAt: done ? idx : undefined,
-      });
+    if (toolCalls.length) {
+      gapTo(aiTime); // reasoning that led to this tool decision
+      for (const tc of toolCalls) {
+        const activity = resolveToolActivity(tc);
+        if (!activity) continue;
+        const done = tc.id ? resultDone.has(tc.id) : false;
+        const resTime = tc.id ? resultTime.get(tc.id) : undefined;
+        steps.push({
+          key: `tool:${tc.id ?? `${idx}:${tc.name}`}`,
+          label: done ? activity.done : activity.running,
+          doneLabel: activity.done,
+          startedAt: order,
+          endedAt: done ? order : undefined,
+          durationMs:
+            aiTime != null && resTime != null
+              ? Math.max(0, resTime - aiTime)
+              : undefined,
+        });
+        order += 1;
+        cursor = resTime ?? aiTime ?? cursor;
+      }
+      return;
     }
 
-    // Generation step when this message carries answer text. It's "running"
-    // only while live AND it's the tail message (still streaming); otherwise
-    // (earlier content, or any settled/historical turn) it reads as done.
+    // Content (answer) message → generation phase (last result → answer),
+    // which absorbs any pre-answer reasoning.
     if (messageText(ai.content).trim().length > 0) {
       const running = live && isLastMsg;
       steps.push({
@@ -294,43 +344,92 @@ function deriveStepsFromTurn(turn: Message[], live: boolean): ThinkingStep[] {
           ? ACTIVITY_LABELS.generating.running
           : ACTIVITY_LABELS.generating.done,
         doneLabel: ACTIVITY_LABELS.generating.done,
-        startedAt: idx + 0.5,
-        endedAt: running ? undefined : idx,
+        startedAt: order,
+        endedAt: running ? undefined : order,
+        durationMs:
+          cursor != null && aiTime != null
+            ? Math.max(0, aiTime - cursor)
+            : undefined,
       });
+      order += 1;
+      cursor = aiTime ?? cursor;
     }
   });
+
+  // Live in-progress "Thinking…": when the turn's tail is a tool result, the
+  // agent is deciding its next step. Show a running Thinking step now (its
+  // duration is unknown until the next activity starts, at which point it
+  // becomes a settled "Thinking · Ns" gap). This makes the gaps appear live
+  // instead of only after the turn finishes.
+  if (live && turn.length > 0 && turn[turn.length - 1]?.type === "tool") {
+    steps.push({
+      key: "think:live",
+      label: ACTIVITY_LABELS.gettingStarted, // "Thinking…"
+      doneLabel: ACTIVITY_LABELS.thinking,
+      startedAt: order,
+      endedAt: undefined,
+    });
+  }
+
   return steps;
 }
 
+// Turn start = the human message just before `start`, so the initial thinking
+// gap is measured from when the user's turn began.
+function turnStartTime(
+  messages: Message[],
+  humanIdx: number,
+  times: MessageTimes,
+): number | undefined {
+  const id = humanIdx >= 0 ? messages[humanIdx]?.id : undefined;
+  return id ? times.get(id) : undefined;
+}
+
 // Live steps for the CURRENT (last) turn — messages after the last human msg.
-function deriveActivitySteps(messages: Message[]): ThinkingStep[] {
+function deriveActivitySteps(
+  messages: Message[],
+  times: MessageTimes,
+): ThinkingStep[] {
   let start = 0;
+  let humanIdx = -1;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     if (messages[i]?.type === "human") {
+      humanIdx = i;
       start = i + 1;
       break;
     }
   }
-  return deriveStepsFromTurn(messages.slice(start), true);
+  return deriveStepsFromTurn(
+    messages.slice(start),
+    times,
+    turnStartTime(messages, humanIdx, times),
+    true,
+  );
 }
 
-// Steps for a historical turn, keyed by its answer (AI) message id. Used to
-// rebuild the "Thought process" trace when an old thread is opened — the sealed
-// live trace only exists for turns run in the current session.
+// Steps for a completed / historical turn, keyed by its answer (AI) message id.
 export function deriveActivityStepsForAnswer(
   messages: Message[],
   answerId: string,
+  times: MessageTimes,
 ): ThinkingStep[] {
   const endIdx = messages.findIndex((m) => m.id === answerId);
   if (endIdx < 0) return [];
   let start = 0;
+  let humanIdx = -1;
   for (let i = endIdx - 1; i >= 0; i -= 1) {
     if (messages[i]?.type === "human") {
+      humanIdx = i;
       start = i + 1;
       break;
     }
   }
-  return deriveStepsFromTurn(messages.slice(start, endIdx + 1), false);
+  return deriveStepsFromTurn(
+    messages.slice(start, endIdx + 1),
+    times,
+    turnStartTime(messages, humanIdx, times),
+    false,
+  );
 }
 
 // Combine event-driven steps (the ONLY live signal for a blocking subagent
@@ -381,7 +480,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const [debugMap, setDebugMap] = useState<Record<string, DebugPayload>>({});
   const [customFollowUps, setCustomFollowUps] = useState<string[]>([]);
   const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
-  const [thinkingStepsMap, setThinkingStepsMap] = useState<Record<string, ThinkingStepsEntry>>({});
   const [liveThoughtExpanded, setLiveThoughtExpanded] = useState(false);
   const [lastDonePayload, setLastDonePayload] = useState<unknown>(null);
   const [errorOverride, setErrorOverride] = useState<Error | undefined>();
@@ -397,10 +495,24 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   // the accumulating array without a stale-closure problem.
   const pendingStepsRef = useRef<ThinkingStep[]>([]);
 
+  // Latest per-message created_at map, so onFinish (defined before the memo that
+  // builds it) can read the current timestamps to seal the finished trace.
+  const messageTimesRef = useRef<MessageTimes>(new Map());
+
+  // Live-only wall-clock per step key: created_at isn't available until a turn
+  // settles, so to show approximate per-activity "Thought for Ns" DURING the run
+  // we time each step by observation (start when it appears, end when it closes).
+  // Settled/history durations still come from created_at (accurate).
+  const stepClockRef = useRef<
+    Map<string, { startedAt: number; endedAt?: number }>
+  >(new Map());
+  const [liveClockVersion, setLiveClockVersion] = useState(0);
+
   const resetTurnState = useCallback(() => {
     setCustomFollowUps([]);
     setThinkingSteps([]);
     pendingStepsRef.current = [];
+    stepClockRef.current = new Map();
     setErrorOverride(undefined);
     pendingDocumentsRef.current = null;
     pendingDebugRef.current = null;
@@ -408,7 +520,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   }, []);
 
   const hasSubmittedRef = useRef(false);
-  const turnStartRef = useRef<number>(0);
 
   const harvestCustomEvent = useCallback((data: unknown) => {
     if (!data || typeof data !== "object") return;
@@ -525,33 +636,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
         ...(debug ? { debug } : {}),
       });
 
-      // Seal any open thinking step and commit the finished trace to the map.
-      // Combine event-driven steps (search) with message-derived activity steps
-      // (tool calls + generation) from the current turn.
-      const combinedSteps = mergeStepSources(
-        pendingStepsRef.current,
-        deriveActivitySteps(messages),
-      );
-      if (combinedSteps.length && aiId) {
-        const now = Date.now();
-        const sealedSteps = combinedSteps.map((s) =>
-          s.endedAt === undefined
-            ? {
-                ...s,
-                label: s.doneLabel ?? STEP_DONE_LABELS[s.key] ?? s.label,
-                endedAt: now,
-              }
-            : s,
-        );
-        setThinkingStepsMap((prev) => ({
-          ...prev,
-          [aiId]: {
-            steps: sealedSteps,
-            turnStartedAt: turnStartRef.current,
-            turnEndedAt: now,
-          },
-        }));
-      }
+      // Clear the per-turn event-step buffer. The completed turn's trace is
+      // re-derived on demand from its messages + checkpoint timestamps (see
+      // deriveActivityStepsForAnswer in ai.tsx), so nothing needs sealing here.
       pendingStepsRef.current = [];
       setThinkingSteps([]);
 
@@ -563,7 +650,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const submit = useCallback<typeof stream.submit>(
     (values, options) => {
       hasSubmittedRef.current = true;
-      turnStartRef.current = Date.now();
       setStopped(false);
       resetTurnState();
       return stream.submit(values, options);
@@ -637,22 +723,82 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
   const error = errorOverride ?? (stream.error as Error | undefined);
 
+  // Per-message checkpoint timestamps (created_at). This is the source of all
+  // activity durations — accurate and buffering-proof, and available for both
+  // the live turn and history.
+  const messageTimes = useMemo<MessageTimes>(() => {
+    const map = new Map<string, number>();
+    for (const m of stream.messages) {
+      if (!m.id) continue;
+      const ca = stream.getMessagesMetadata(m)?.firstSeenState?.created_at;
+      if (!ca) continue;
+      const t = Date.parse(ca);
+      if (!Number.isNaN(t)) map.set(m.id, t);
+    }
+    return map;
+    // stream.messages identity changes as the thread updates; recompute then.
+  }, [stream]);
+  // Keep a ref so onFinish (defined before this memo) can read the latest times.
+  useEffect(() => {
+    messageTimesRef.current = messageTimes;
+  }, [messageTimes]);
+
   // Live view of the trace: event-driven steps (search) plus message-derived
-  // activity steps (each tool call + the generation phase) for the current turn.
-  // While loading this drives the activity checklist; after finish index.tsx
-  // hides it and the sealed copy in thinkingStepsMap powers "Thought for Ns".
+  // activity steps (thinking gaps + tool calls + generation), with durations
+  // from created_at. index.tsx shows it live; ai.tsx re-derives the same for
+  // completed/history turns.
   const activitySteps = useMemo(
-    () => deriveActivitySteps(stream.messages),
-    [stream.messages],
+    () => deriveActivitySteps(stream.messages, messageTimes),
+    [stream.messages, messageTimes],
   );
   const mergedThinkingSteps = useMemo(
     () => mergeStepSources(thinkingSteps, activitySteps),
     [thinkingSteps, activitySteps],
   );
 
+  // Observe wall-clock timing per step while loading: record when a step first
+  // appears and when it closes. Only used to fill LIVE durations (created_at
+  // isn't available until settle); bump a version so the UI reflects it.
+  useEffect(() => {
+    if (!isLoading) return;
+    const now = Date.now();
+    let changed = false;
+    for (const s of mergedThinkingSteps) {
+      const done = s.endedAt !== undefined;
+      const existing = stepClockRef.current.get(s.key);
+      if (!existing) {
+        stepClockRef.current.set(s.key, {
+          startedAt: now,
+          endedAt: done ? now : undefined,
+        });
+        changed = true;
+      } else if (done && existing.endedAt === undefined) {
+        existing.endedAt = now;
+        changed = true;
+      }
+    }
+    if (changed) setLiveClockVersion((v) => v + 1);
+  }, [mergedThinkingSteps, isLoading]);
+
+  // Overlay approximate live durations onto steps that don't already have one
+  // from created_at (i.e. during the run). Settled/history steps keep created_at.
+  const liveThinkingSteps = useMemo(
+    () =>
+      mergedThinkingSteps.map((s) => {
+        if (s.durationMs != null) return s;
+        const c = stepClockRef.current.get(s.key);
+        if (!c || c.endedAt === undefined) return s;
+        return { ...s, durationMs: c.endedAt - c.startedAt };
+      }),
+    // liveClockVersion isn't read in the body, but bumping it re-runs this memo
+    // so newly-observed durations (held in stepClockRef) are picked up.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mergedThinkingSteps, liveClockVersion],
+  );
+
   // Derived from the live step array so AssistantMessageLoading still gets a
   // subtitle string without any changes to its props.
-  const thinkingStep = mergedThinkingSteps.at(-1)?.label ?? "";
+  const thinkingStep = liveThinkingSteps.at(-1)?.label ?? "";
 
   const streamValue = useMemo<StreamContextType>(
     () => ({
@@ -665,8 +811,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       debugMap,
       followUpQuestions,
       thinkingStep,
-      thinkingSteps: mergedThinkingSteps,
-      thinkingStepsMap,
+      thinkingSteps: liveThinkingSteps,
+      messageTimes,
       liveThoughtExpanded,
       setLiveThoughtExpanded,
       lastDonePayload,
@@ -682,8 +828,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       debugMap,
       followUpQuestions,
       thinkingStep,
-      mergedThinkingSteps,
-      thinkingStepsMap,
+      liveThinkingSteps,
+      messageTimes,
       liveThoughtExpanded,
       lastDonePayload,
       streamingMessageId,
