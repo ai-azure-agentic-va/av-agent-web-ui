@@ -41,6 +41,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { SettingsPanel } from "./settings-panel";
+import { SessionBoundaryNudge } from "./session-nudge";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import ThreadHistory from "./history";
@@ -736,6 +737,11 @@ export function Thread() {
           {chatStarted && (
             <div className="border-border bg-background border-t px-4 py-4">
               <div className="mx-auto max-w-3xl">
+                <SessionBoundaryNudge
+                  messages={messages}
+                  threadId={threadId}
+                  onStartFresh={() => setThreadId(null)}
+                />
                 <ChatInput
                   input={input}
                   setInput={setInput}
