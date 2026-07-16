@@ -1,4 +1,5 @@
-import type { Message } from "@langchain/langgraph-sdk";
+import type { Message, ToolMessage } from "@langchain/langgraph-sdk";
+import type { AnalyzedDocument } from "@/providers/Stream";
 
 /**
  * Extracts a string summary from a message's content, supporting multimodal (text, image, file, etc.).
@@ -77,6 +78,85 @@ export function linkifyCitations(
     // Escaped inner brackets so the link text renders as literal "[n]".
     return `[\\[${num}\\]](<${safeUrl}>)`;
   });
+}
+
+// The backend registers the KB search tool under this name; its ToolMessage
+// carries the turn's retrieved documents on `.artifact` (see ai_search_tool).
+const AI_SEARCH_TOOL_NAME = "ai_search_tool";
+
+/** Read the documents list off a ToolMessage artifact, tolerating either the
+ * bare-array shape the tool returns or a `{ documents: [...] }` wrapper. Returns
+ * an empty array for anything unexpected (e.g. historical messages predating the
+ * artifact, whose `.artifact` is undefined). */
+function documentsFromArtifact(artifact: unknown): AnalyzedDocument[] {
+  if (Array.isArray(artifact)) return artifact as AnalyzedDocument[];
+  if (
+    artifact &&
+    typeof artifact === "object" &&
+    Array.isArray((artifact as { documents?: unknown }).documents)
+  ) {
+    return (artifact as { documents: AnalyzedDocument[] }).documents;
+  }
+  return [];
+}
+
+/**
+ * Rebuild the per-answer documents map from PERSISTED messages — the durable
+ * source for threads opened from history, where the live `documents` custom
+ * stream event never replays. `ai_search_tool` persists its retrieved-document
+ * set on the ToolMessage `.artifact`, so we walk each turn (a `human` message
+ * starts a new one), union that turn's tool artifacts deduped by the backend's
+ * turn-stable `index`, and key the result under the turn's answer (its last
+ * text-bearing AI) message id — the same key the live path and ai.tsx use, so
+ * history renders identically to a live turn. Turns without a KB search yield no
+ * entry.
+ */
+export function deriveDocumentsFromMessages(
+  messages: Message[],
+): Record<string, AnalyzedDocument[]> {
+  const out: Record<string, AnalyzedDocument[]> = {};
+  // Current turn's documents (deduped by index) + the id of the turn's latest AI
+  // message. The answer is the last AI message of the turn, so this keeps moving
+  // to the newest AI id; tool artifacts accrue regardless of intra-turn order.
+  let byIndex = new Map<number, AnalyzedDocument>();
+  let answerId: string | null = null;
+
+  const flush = () => {
+    if (answerId && byIndex.size > 0) {
+      out[answerId] = [...byIndex.values()].sort(
+        (a, b) => (a.index ?? 0) - (b.index ?? 0),
+      );
+    }
+    byIndex = new Map();
+    answerId = null;
+  };
+
+  for (const m of messages) {
+    if (m.type === "human") {
+      flush();
+      continue;
+    }
+    if (m.type === "ai") {
+      // Key docs to the ANSWER — the last AI message that carries text. A
+      // tool-call-only AI message (empty content, which appears mid-turn while a
+      // live turn streams) must NEVER become the host, or "Referenced Sources"
+      // would flash under the in-flight tool-call bubble before the answer
+      // streams, then jump. A settled turn's answer always carries text, so this
+      // keys identically to the live path for history.
+      if (m.id && getContentString(m.content).trim() !== "") answerId = m.id;
+      continue;
+    }
+    if (m.type === "tool" && (m as ToolMessage).name === AI_SEARCH_TOOL_NAME) {
+      for (const doc of documentsFromArtifact((m as ToolMessage).artifact)) {
+        const idx = doc.index;
+        // First payload for an index wins; the backend records a document once
+        // per turn, so repeats across a turn's searches are identical anyway.
+        if (typeof idx === "number" && !byIndex.has(idx)) byIndex.set(idx, doc);
+      }
+    }
+  }
+  flush(); // last turn has no trailing `human` to trigger the flush above
+  return out;
 }
 
 /** Remove the "Want to explore further?" section so it can render as chips instead. */

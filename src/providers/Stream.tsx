@@ -22,6 +22,7 @@ import {
   resolveToolActivity,
   ACTIVITY_LABELS,
 } from "@/lib/activity-labels";
+import { deriveDocumentsFromMessages } from "@/components/thread/utils";
 
 // Best-effort: the standard LangGraph contract streams plain messages. These
 // extra fields (sources / follow-ups / debug / thinking steps) are only
@@ -654,6 +655,20 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   // subtitle string without any changes to its props.
   const thinkingStep = mergedThinkingSteps.at(-1)?.label ?? "";
 
+  // Documents for turns opened from history: the live `documents` custom event
+  // never replays, but each ai_search ToolMessage persists its retrieved set on
+  // `.artifact`, so we rebuild the per-answer map from the persisted messages.
+  // Live state (documentsMap, committed in onFinish) is spread last so it wins
+  // for the active turn on any shared answer-message id.
+  const derivedDocumentsMap = useMemo(
+    () => deriveDocumentsFromMessages(stream.messages),
+    [stream.messages],
+  );
+  const mergedDocumentsMap = useMemo(
+    () => ({ ...derivedDocumentsMap, ...documentsMap }),
+    [derivedDocumentsMap, documentsMap],
+  );
+
   const streamValue = useMemo<StreamContextType>(
     () => ({
       ...stream,
@@ -661,7 +676,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       stop,
       error,
       isLoading,
-      documentsMap,
+      documentsMap: mergedDocumentsMap,
       debugMap,
       followUpQuestions,
       thinkingStep,
@@ -678,7 +693,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       stop,
       error,
       isLoading,
-      documentsMap,
+      mergedDocumentsMap,
       debugMap,
       followUpQuestions,
       thinkingStep,
