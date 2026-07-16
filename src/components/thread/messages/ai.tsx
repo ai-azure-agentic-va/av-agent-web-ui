@@ -177,10 +177,9 @@ export function AssistantMessage({
     ? thread.documentsMap?.[message.id]
     : undefined;
   const debug = message?.id ? thread.debugMap?.[message.id] : undefined;
-  const thoughtEntry = message?.id ? thread.thinkingStepsMap?.[message.id] : undefined;
 
   // Host the LIVE activity disclosure on the current turn's last AI message, so
-  // it sits on top of the streaming answer in the same slot the sealed "Thought
+  // it sits on top of the streaming answer in the same slot the settled "Thought
   // for Ns" disclosure will occupy — no position jump when the run finishes.
   const lastAiId = useMemo(() => {
     // Only needed while streaming; skip the scan on settled threads.
@@ -193,28 +192,35 @@ export function AssistantMessage({
   }, [thread.messages, thread.isLoading]);
   const showLiveThought =
     thread.isLoading &&
-    !thoughtEntry &&
     message?.id === lastAiId &&
     thread.thinkingSteps.length > 0;
 
-  // For turns NOT run in this session (opened from chat history), the sealed
-  // live trace (thoughtEntry) doesn't exist. Rebuild the trace from the turn's
-  // persisted messages so history shows the same tool tracing the boxes do.
-  // Only host it on the turn's answer message, and only when there's no live or
-  // sealed trace already covering it.
+  // For every COMPLETED turn (this session or opened from history), rebuild the
+  // trace on demand from the turn's messages + their checkpoint timestamps. This
+  // is consistent everywhere (durations come from created_at) and needs no
+  // sealed session state. Only host it on the turn's answer message.
   const historicalSteps = useMemo(() => {
     if (
       isToolResult ||
-      thoughtEntry ||
       showLiveThought ||
       !message?.id ||
       !isTurnAnswer(thread.messages, message.id)
     ) {
       return null;
     }
-    const steps = deriveActivityStepsForAnswer(thread.messages, message.id);
+    const steps = deriveActivityStepsForAnswer(
+      thread.messages,
+      message.id,
+      thread.messageTimes,
+    );
     return steps.length ? steps : null;
-  }, [isToolResult, thoughtEntry, showLiveThought, message?.id, thread.messages]);
+  }, [
+    isToolResult,
+    showLiveThought,
+    message?.id,
+    thread.messages,
+    thread.messageTimes,
+  ]);
 
   // Citation-linked markdown source. Memoized so the regex linkify only re-runs
   // when this message's content or its documents change — not every render of an
@@ -267,7 +273,6 @@ export function AssistantMessage({
     !debug &&
     !interruptVisible &&
     !customComponents?.length &&
-    !thoughtEntry &&
     !showLiveThought &&
     !historicalSteps
   ) {
@@ -300,18 +305,7 @@ export function AssistantMessage({
           </>
         ) : (
           <>
-            {thoughtEntry ? (
-              <ThoughtDisclosure
-                steps={thoughtEntry.steps}
-                durationSec={Math.max(
-                  1,
-                  Math.round(
-                    (thoughtEntry.turnEndedAt - thoughtEntry.turnStartedAt) /
-                      1000,
-                  ),
-                )}
-              />
-            ) : showLiveThought ? (
+            {showLiveThought ? (
               <ThoughtDisclosure steps={thread.thinkingSteps} live />
             ) : historicalSteps ? (
               <ThoughtDisclosure steps={historicalSteps} />
@@ -391,14 +385,12 @@ export function AssistantMessage({
 // what stops the old "jump" where the trace only appeared after generation.
 function ThoughtDisclosure({
   steps,
-  durationSec,
   live = false,
 }: {
   steps: ThinkingStep[];
-  durationSec?: number;
   live?: boolean;
 }) {
-  // Sealed/historical disclosures own their expand state locally. The LIVE one
+  // Settled/historical disclosures own their expand state locally. The LIVE one
   // reads/writes shared context state so it survives the host AI message changing
   // mid-turn (each change would otherwise remount a fresh, collapsed disclosure).
   const thread = useStreamContext();
@@ -408,14 +400,20 @@ function ThoughtDisclosure({
 
   if (!steps.length) return null;
 
+  // Total = sum of per-activity durations, so the collapsed header and the
+  // expanded breakdown always reconcile (the "Thinking" gap steps make the
+  // per-activity durations tile the whole turn).
+  const totalMs = steps.reduce((acc, s) => acc + (s.durationMs ?? 0), 0);
+  const hasDurations = steps.some((s) => s.durationMs != null);
+
   // While live, prefer the currently-open step's label; if all steps have
   // closed (e.g. search finished and the answer is now streaming), fall back to
   // the generic working label.
   const openStep = steps.find((s) => s.endedAt === undefined);
   const headerLabel = live
     ? (openStep?.label ?? ACTIVITY_LABELS.working)
-    : durationSec != null
-      ? `${ACTIVITY_LABELS.thoughtPrefix} ${durationSec}${ACTIVITY_LABELS.thoughtSuffix}`
+    : hasDurations
+      ? `${ACTIVITY_LABELS.thoughtPrefix} ${Math.max(1, Math.round(totalMs / 1000))}${ACTIVITY_LABELS.thoughtSuffix}`
       : ACTIVITY_LABELS.thoughtProcess;
 
   return (
@@ -456,17 +454,42 @@ function ThoughtDisclosure({
         <div className="mt-2 flex flex-col gap-1.5 pl-1">
           {steps.map((step) => {
             const isDone = step.endedAt !== undefined;
+            const isGap = step.key.startsWith("think:");
+            // Per-activity duration (from created_at).
+            const stepSec =
+              step.durationMs !== undefined
+                ? Math.max(1, Math.round(step.durationMs / 1000))
+                : null;
             return (
               <div
                 key={`${step.key}-${step.startedAt}`}
                 className="flex items-center gap-2"
               >
-                {isDone ? (
+                {isGap ? (
+                  // Reasoning gap — neutral marker, not a task checkmark.
+                  // Pulses while the gap is still in progress (live thinking).
+                  <div
+                    className={cn(
+                      "border-muted-foreground/50 h-2 w-2 shrink-0 rounded-full border",
+                      !isDone && "bg-muted-foreground/40 animate-pulse",
+                    )}
+                  />
+                ) : isDone ? (
                   <Check className="text-primary h-3.5 w-3.5 shrink-0" />
                 ) : (
                   <div className="bg-primary/60 h-2 w-2 shrink-0 animate-pulse rounded-full" />
                 )}
-                <span className={cn(!isDone && "italic")}>{step.label}</span>
+                <span
+                  className={cn((!isDone || isGap) && "text-muted-foreground")}
+                >
+                  {step.label}
+                </span>
+                {stepSec != null && (
+                  <span className="text-muted-foreground/70 text-xs">
+                    · {ACTIVITY_LABELS.thoughtPrefix} {stepSec}
+                    {ACTIVITY_LABELS.thoughtSuffix}
+                  </span>
+                )}
               </div>
             );
           })}

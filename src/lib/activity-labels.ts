@@ -1,20 +1,19 @@
 // Single source of truth for every user-facing agent-activity / status string.
+// Change any wording here and it updates everywhere (the live activity
+// indicator and the persisted "Thought for Ns" trace). Nothing else in the app
+// should hardcode these strings.
 //
-// Change any wording here and it updates everywhere: the live activity
-// indicator, the per-phase step labels, and the persisted "Thought for Ns"
-// trace. Nothing else in the app should hardcode these strings.
-//
-// There are two kinds of activity:
-//   • `steps`     — driven by backend custom stream events (search_start, etc.),
-//                   keyed by the event's step key.
-//   • `subagents` — driven by `task` tool calls to a subagent, keyed by the
-//                   tool call's `subagent_type`. ServiceNow lives here because
-//                   the backend delegates to it via a tool call, not an event.
+// Activities are derived from the message stream and labelled here:
+//   • `subagents` — `task` tool calls, keyed by `subagent_type` (e.g. ServiceNow).
+//   • `tools`     — any other tool call, keyed by tool name (else humanized).
 
 export const ACTIVITY_LABELS = {
   // Generic fallbacks shown before / when the agent hasn't reported a phase.
   gettingStarted: "Thinking…",
   working: "Working on your request…",
+  // Label for the reasoning gaps between activities (so the per-activity
+  // breakdown tiles the whole turn and sums to the total).
+  thinking: "Thinking",
 
   // Shown while the agent is producing the answer text.
   generating: {
@@ -22,17 +21,11 @@ export const ACTIVITY_LABELS = {
     done: "Generated response",
   },
 
-  // Persisted trace disclosure, rendered as `${thoughtPrefix} ${n}${thoughtSuffix}`.
+  // Trace disclosure header, rendered as `${thoughtPrefix} ${n}${thoughtSuffix}`.
   thoughtPrefix: "Thought for",
   thoughtSuffix: "s",
-  // Header used for historical turns where the duration isn't recoverable.
+  // Header used when no durations are available (e.g. a turn with no activities).
   thoughtProcess: "Thought process",
-
-  // Event-driven phases, keyed by backend step key. Currently empty: the KB
-  // search is surfaced via the `ai_search_tool` tool call below (same operation),
-  // not a custom event, so it works in history too. Kept for any future
-  // event-only phase the backend might emit that has no tool call.
-  steps: {} as Record<string, { running: string; done: string }>,
 
   // Subagent-delegation phases, keyed by the `task` tool call's `subagent_type`.
   subagents: {
@@ -49,8 +42,7 @@ export const ACTIVITY_LABELS = {
   // Convention for all labels: running = present-continuous + "…"; done = past
   // tense; sentence case with proper acronyms (AI, KB, …).
   tools: {
-    // The AI search tool IS the knowledge-base search (the backend also emits a
-    // `search` event for it, which we intentionally drop to avoid a duplicate).
+    // The AI search tool IS the knowledge-base search.
     ai_search_tool: {
       running: "Searching knowledge base…",
       done: "Searched knowledge base",
@@ -61,15 +53,6 @@ export const ACTIVITY_LABELS = {
     },
   } as Record<string, { running: string; done: string }>,
 } as const;
-
-// Derived lookups keyed by step key — consumed by the step-timeline reducer.
-export const STEP_RUNNING_LABELS: Record<string, string> = Object.fromEntries(
-  Object.entries(ACTIVITY_LABELS.steps).map(([key, v]) => [key, v.running]),
-);
-
-export const STEP_DONE_LABELS: Record<string, string> = Object.fromEntries(
-  Object.entries(ACTIVITY_LABELS.steps).map(([key, v]) => [key, v.done]),
-);
 
 // Common acronyms that should stay fully uppercased in humanized labels.
 const ACRONYMS: Record<string, string> = {
