@@ -6,12 +6,16 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
-import { FC, memo, useState } from "react";
+import { FC, memo, useState, useEffect, ReactNode } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { SyntaxHighlighter } from "@/components/thread/syntax-highlighter";
 
 import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
 import { cn } from "@/lib/utils";
+import {
+  rehypeLocalizeTimestamps,
+  formatLocalTimestamp,
+} from "@/lib/localize-timestamps";
 
 import "katex/dist/katex.min.css";
 
@@ -57,6 +61,36 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
         {isCopied && <CheckIcon />}
       </TooltipIconButton>
     </div>
+  );
+};
+
+/**
+ * Renders a UTC timestamp (wrapped by the `rehypeLocalizeTimestamps` plugin)
+ * in the viewer's local timezone. The original UTC text is shown on first
+ * paint / SSR to stay hydration-safe, then swapped to local time after mount
+ * so it always matches the browser's zone. Hovering shows the source UTC value.
+ */
+const LocalTime: FC<{ dateTime?: string; children?: ReactNode }> = ({
+  dateTime,
+  children,
+}) => {
+  const original = String(children ?? "");
+  const [local, setLocal] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!dateTime) return;
+    const parsed = new Date(dateTime);
+    if (!Number.isNaN(parsed.getTime())) setLocal(formatLocalTimestamp(parsed));
+  }, [dateTime]);
+
+  return (
+    <time
+      dateTime={dateTime}
+      title={local ? `Source: ${original}` : undefined}
+      className="underline decoration-dotted decoration-1 underline-offset-2"
+    >
+      {local ?? original}
+    </time>
   );
 };
 
@@ -195,6 +229,7 @@ const defaultComponents: any = {
       {...props}
     />
   ),
+  time: LocalTime,
   pre: ({ className, ...props }: { className?: string }) => (
     <pre
       className={cn(
@@ -250,7 +285,7 @@ const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
     <div className="markdown-content">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[rehypeKatex, rehypeLocalizeTimestamps]}
         components={defaultComponents}
       >
         {children}

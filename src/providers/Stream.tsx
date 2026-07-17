@@ -18,6 +18,7 @@ import {
 import { useQueryState } from "nuqs";
 import { useThreads } from "@/providers/Thread";
 import { resolveToolActivity, ACTIVITY_LABELS } from "@/lib/activity-labels";
+import { deriveDocumentsFromMessages } from "@/components/thread/utils";
 
 // Best-effort: the standard LangGraph contract streams plain messages. These
 // extra fields (sources / follow-ups / debug / thinking steps) are only
@@ -28,11 +29,14 @@ export type StateType = {
   ui?: any[];
   context?: Record<string, unknown>;
   follow_up_questions?: string[];
-  sources?: Source[];
   debug?: DebugPayload;
 };
 
-export type Source = {
+// One document (its chunks collapsed) that AI Search retrieved this turn. The
+// backend numbers these 1..n and streams the full retrieved set via the
+// `documents` custom event; the UI renders them as "Referenced Sources" and
+// links inline [n] citation markers to the matching entry.
+export type AnalyzedDocument = {
   index?: number;
   title?: string;
   url?: string;
@@ -108,7 +112,7 @@ export type ThinkingStep = {
 };
 
 type StreamContextType = ReturnType<typeof useStream<StateType>> & {
-  sourcesMap: Record<string, Source[]>;
+  documentsMap: Record<string, AnalyzedDocument[]>;
   debugMap: Record<string, DebugPayload>;
   followUpQuestions: string[];
   thinkingStep: string;
@@ -471,7 +475,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
   // Best-effort custom UI state. Populated only when the graph emits matching
   // custom stream events / state; otherwise stays empty.
-  const [sourcesMap, setSourcesMap] = useState<Record<string, Source[]>>({});
+  const [documentsMap, setDocumentsMap] = useState<
+    Record<string, AnalyzedDocument[]>
+  >({});
   const [debugMap, setDebugMap] = useState<Record<string, DebugPayload>>({});
   const [customFollowUps, setCustomFollowUps] = useState<string[]>([]);
   const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([]);
@@ -480,14 +486,12 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const [errorOverride, setErrorOverride] = useState<Error | undefined>();
   const [stopped, setStopped] = useState(false);
 
-  // Harvested during a run, committed to the keyed maps on finish.
-  const pendingSourcesRef = useRef<Source[] | null>(null);
+  // Harvested during a run, committed to the keyed maps on finish. The backend
+  // streams the FULL retrieved-document set on each `documents` event, so this
+  // just holds the latest list (an idempotent replace — no accumulation).
+  const pendingDocumentsRef = useRef<AnalyzedDocument[] | null>(null);
   const pendingDebugRef = useRef<DebugPayload | null>(null);
   const runIdRef = useRef<string | null>(null);
-  // Set once `sources_final` arrives, so the finish handler treats the pending
-  // sources as an authoritative replacement (an empty list clears the panel)
-  // rather than falling back to the accumulated / state sources.
-  const sourcesFinalRef = useRef<boolean>(false);
   // Mirrors thinkingSteps state; the ref gives onFinish synchronous access to
   // the accumulating array without a stale-closure problem.
   const pendingStepsRef = useRef<ThinkingStep[]>([]);
@@ -511,10 +515,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     pendingStepsRef.current = [];
     stepClockRef.current = new Map();
     setErrorOverride(undefined);
-    pendingSourcesRef.current = null;
+    pendingDocumentsRef.current = null;
     pendingDebugRef.current = null;
     runIdRef.current = null;
-    sourcesFinalRef.current = false;
   }, []);
 
   const hasSubmittedRef = useRef(false);
@@ -526,23 +529,21 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     const step =
       asString(body.event) || asString(body.step) || asString(body.type);
 
-    // `sources_final` is the authoritative replacement emitted after the agent
-    // finishes: it holds ONLY the inline-cited sources. Per the replace
-    // contract, swap out the incrementally accumulated `search_complete` set
-    // for this list verbatim — including an empty list, which clears the panel.
-    // It is not a thinking step, so don't surface it as a status label.
-    if (step === "sources_final") {
-      if (Array.isArray(body.sources)) {
-        pendingSourcesRef.current = (body.sources as Source[])
+    // `documents` carries the FULL set of documents AI Search retrieved this
+    // turn (every search's hits, cited or not), already numbered 1..n by the
+    // backend. Each event is the whole accumulated list, so we just replace —
+    // no merge/accumulation. Rendered later as "Referenced Sources".
+    if (step === "documents") {
+      if (Array.isArray(body.documents)) {
+        pendingDocumentsRef.current = (body.documents as AnalyzedDocument[])
           .slice()
           .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-        sourcesFinalRef.current = true;
       }
       return;
     }
 
     // --- Step timeline reducer ---
-    
+
     if (step === "servicenow_delegating") {
       const labels = ACTIVITY_LABELS.subagents["servicenow-ticket-agent"];
       const key = "subagent:servicenow-ticket-agent";
@@ -558,21 +559,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     }
     // --- End step timeline reducer ---
 
-    if (Array.isArray(body.sources)) {
-      // Accumulate across events by merging on the backend-guaranteed `index`,
-      // so a later (e.g. retry/refine) event that carries a partial list updates
-      // matching entries in place instead of clobbering earlier sources.
-      const byIndex = new Map<number, Source>();
-      for (const s of pendingSourcesRef.current ?? []) {
-        if (typeof s.index === "number") byIndex.set(s.index, s);
-      }
-      for (const s of body.sources as Source[]) {
-        if (typeof s.index === "number") byIndex.set(s.index, s);
-      }
-      pendingSourcesRef.current = [...byIndex.values()].sort(
-        (a, b) => (a.index ?? 0) - (b.index ?? 0),
-      );
-    }
     if (body.debug && typeof body.debug === "object") {
       pendingDebugRef.current = body.debug as DebugPayload;
     }
@@ -626,20 +612,20 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       // Prefer the ID tracked from stream.messages (what AssistantMessage
       // renders) over extracting from state.values, which can lag or differ.
       const aiId = lastSeenAiIdRef.current ?? lastAiMessageId(messages);
-      const sources = sourcesFinalRef.current
-        ? pendingSourcesRef.current
-        : (pendingSourcesRef.current ??
-          (Array.isArray(state?.values?.sources)
-            ? (state.values.sources as Source[])
-            : null));
+      console.debug("[Stream onFinish]", {
+        aiId,
+        pendingSteps: pendingStepsRef.current.length,
+        fromState: lastAiMessageId(messages),
+      });
+      const documents = pendingDocumentsRef.current;
       const debug =
         pendingDebugRef.current ??
         (state?.values?.debug && typeof state.values.debug === "object"
           ? (state.values.debug as DebugPayload)
           : null);
 
-      if (aiId && sources?.length) {
-        setSourcesMap((prev) => ({ ...prev, [aiId]: sources }));
+      if (aiId && documents?.length) {
+        setDocumentsMap((prev) => ({ ...prev, [aiId]: documents }));
       }
       if (aiId && debug) {
         setDebugMap((prev) => ({ ...prev, [aiId]: debug }));
@@ -647,7 +633,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
       setLastDonePayload({
         run_id: runIdRef.current,
-        ...(sources ? { sources } : {}),
+        ...(documents ? { documents } : {}),
         ...(debug ? { debug } : {}),
       });
 
@@ -815,6 +801,20 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   // subtitle string without any changes to its props.
   const thinkingStep = liveThinkingSteps.at(-1)?.label ?? "";
 
+  // Documents for turns opened from history: the live `documents` custom event
+  // never replays, but each ai_search ToolMessage persists its retrieved set on
+  // `.artifact`, so we rebuild the per-answer map from the persisted messages.
+  // Live state (documentsMap, committed in onFinish) is spread last so it wins
+  // for the active turn on any shared answer-message id.
+  const derivedDocumentsMap = useMemo(
+    () => deriveDocumentsFromMessages(stream.messages),
+    [stream.messages],
+  );
+  const mergedDocumentsMap = useMemo(
+    () => ({ ...derivedDocumentsMap, ...documentsMap }),
+    [derivedDocumentsMap, documentsMap],
+  );
+
   const streamValue = useMemo<StreamContextType>(
     () => ({
       ...stream,
@@ -822,7 +822,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       stop,
       error,
       isLoading,
-      sourcesMap,
+      documentsMap: mergedDocumentsMap,
       debugMap,
       followUpQuestions,
       thinkingStep,
@@ -839,7 +839,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       stop,
       error,
       isLoading,
-      sourcesMap,
+      mergedDocumentsMap,
       debugMap,
       followUpQuestions,
       thinkingStep,

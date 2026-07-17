@@ -1,4 +1,5 @@
-import type { Message } from "@langchain/langgraph-sdk";
+import type { Message, ToolMessage } from "@langchain/langgraph-sdk";
+import type { AnalyzedDocument } from "@/providers/Stream";
 
 /**
  * Extracts a string summary from a message's content, supporting multimodal (text, image, file, etc.).
@@ -48,28 +49,114 @@ export function extractFollowUps(content: string): string[] {
 
 /**
  * Turn inline `[n]` citation markers in the answer into clickable links to the
- * corresponding source URL, so a user can click the citation in the text. Markers
- * with no matching source (or no URL) are left as plain text.
+ * matching document in the "Referenced Sources" list (by its backend-assigned
+ * `index`). Markers with no matching document (or no URL) are left as plain text.
  */
 export function linkifyCitations(
   content: string,
-  sources?: { index?: number; url?: string }[],
+  documents?: { index?: number; url?: string }[],
 ): string {
-  if (!content || !sources || sources.length === 0) return content;
+  if (!content || !documents || documents.length === 0) return content;
   const urlByIndex = new Map<number, string>();
-  sources.forEach((s, i) => {
-    const idx = s.index ?? i + 1;
-    if (s.url) urlByIndex.set(idx, s.url);
+  documents.forEach((d, i) => {
+    const idx = d.index ?? i + 1;
+    if (d.url) urlByIndex.set(idx, d.url);
   });
   if (urlByIndex.size === 0) return content;
-  // Match any marker number; an `[n]` with no matching source is left as plain
-  // text rather than dropped, so accumulated indices beyond the small range and
-  // any model/backend mismatch degrade gracefully.
+  // Match any marker number; an `[n]` with no matching document is left as plain
+  // text rather than dropped, so any model/backend mismatch degrades gracefully.
   return content.replace(/\[(\d{1,3})\]/g, (match, num) => {
     const url = urlByIndex.get(Number(num));
+    if (!url) return match;
+    // SharePoint/OneDrive URLs contain spaces (e.g. "/Shared Documents/") and
+    // parentheses, which BREAK a bare markdown destination `(url)` — CommonMark
+    // aborts the link and leaves the raw `[[n]](url)` in the text. Wrap the
+    // destination in <> (an angle-bracket destination may contain spaces and
+    // parens) and %20-encode spaces for a clean href; escape the only chars
+    // that would break the <> form itself.
+    const safeUrl = url.replace(/[<>]/g, encodeURIComponent).replace(/ /g, "%20");
     // Escaped inner brackets so the link text renders as literal "[n]".
-    return url ? `[\\[${num}\\]](${url})` : match;
+    return `[\\[${num}\\]](<${safeUrl}>)`;
   });
+}
+
+// The backend registers the KB search tool under this name; its ToolMessage
+// carries the turn's retrieved documents on `.artifact` (see ai_search_tool).
+const AI_SEARCH_TOOL_NAME = "ai_search_tool";
+
+/** Read the documents list off a ToolMessage artifact, tolerating either the
+ * bare-array shape the tool returns or a `{ documents: [...] }` wrapper. Returns
+ * an empty array for anything unexpected (e.g. historical messages predating the
+ * artifact, whose `.artifact` is undefined). */
+function documentsFromArtifact(artifact: unknown): AnalyzedDocument[] {
+  if (Array.isArray(artifact)) return artifact as AnalyzedDocument[];
+  if (
+    artifact &&
+    typeof artifact === "object" &&
+    Array.isArray((artifact as { documents?: unknown }).documents)
+  ) {
+    return (artifact as { documents: AnalyzedDocument[] }).documents;
+  }
+  return [];
+}
+
+/**
+ * Rebuild the per-answer documents map from PERSISTED messages — the durable
+ * source for threads opened from history, where the live `documents` custom
+ * stream event never replays. `ai_search_tool` persists its retrieved-document
+ * set on the ToolMessage `.artifact`, so we walk each turn (a `human` message
+ * starts a new one), union that turn's tool artifacts deduped by the backend's
+ * turn-stable `index`, and key the result under the turn's answer (its last
+ * text-bearing AI) message id — the same key the live path and ai.tsx use, so
+ * history renders identically to a live turn. Turns without a KB search yield no
+ * entry.
+ */
+export function deriveDocumentsFromMessages(
+  messages: Message[],
+): Record<string, AnalyzedDocument[]> {
+  const out: Record<string, AnalyzedDocument[]> = {};
+  // Current turn's documents (deduped by index) + the id of the turn's latest AI
+  // message. The answer is the last AI message of the turn, so this keeps moving
+  // to the newest AI id; tool artifacts accrue regardless of intra-turn order.
+  let byIndex = new Map<number, AnalyzedDocument>();
+  let answerId: string | null = null;
+
+  const flush = () => {
+    if (answerId && byIndex.size > 0) {
+      out[answerId] = [...byIndex.values()].sort(
+        (a, b) => (a.index ?? 0) - (b.index ?? 0),
+      );
+    }
+    byIndex = new Map();
+    answerId = null;
+  };
+
+  for (const m of messages) {
+    if (m.type === "human") {
+      flush();
+      continue;
+    }
+    if (m.type === "ai") {
+      // Key docs to the ANSWER — the last AI message that carries text. A
+      // tool-call-only AI message (empty content, which appears mid-turn while a
+      // live turn streams) must NEVER become the host, or "Referenced Sources"
+      // would flash under the in-flight tool-call bubble before the answer
+      // streams, then jump. A settled turn's answer always carries text, so this
+      // keys identically to the live path for history.
+      if (m.id && getContentString(m.content).trim() !== "") answerId = m.id;
+      continue;
+    }
+    if (m.type === "tool" && (m as ToolMessage).name === AI_SEARCH_TOOL_NAME) {
+      for (const doc of documentsFromArtifact((m as ToolMessage).artifact)) {
+        const idx = doc.index;
+        // First payload for an index wins; the backend records a document once
+        // per turn, so repeats across a turn's searches are identical anyway.
+        if (typeof idx === "number" && !byIndex.has(idx)) byIndex.set(idx, doc);
+      }
+    }
+  }
+  flush(); // last turn has no trailing `human` to trigger the flush above
+  return out;
 }
 
 /** Remove the "Want to explore further?" section so it can render as chips instead. */

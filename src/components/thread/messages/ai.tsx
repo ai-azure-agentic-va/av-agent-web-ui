@@ -11,7 +11,7 @@ import {
   stripFollowUpSection,
   linkifyCitations,
 } from "../utils";
-import { CitedSources } from "./sources";
+import { DocumentsAnalyzed } from "./documents-analyzed";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
 import { LoadExternalComponent } from "@langchain/langgraph-sdk/react-ui";
@@ -173,7 +173,9 @@ export function AssistantMessage({
   const hasAnthropicToolCalls = !!anthropicStreamedToolCalls?.length;
   const isToolResult = message?.type === "tool";
 
-  const sources = message?.id ? thread.sourcesMap?.[message.id] : undefined;
+  const documents = message?.id
+    ? thread.documentsMap?.[message.id]
+    : undefined;
   const debug = message?.id ? thread.debugMap?.[message.id] : undefined;
 
   // Host the LIVE activity disclosure on the current turn's last AI message, so
@@ -221,12 +223,12 @@ export function AssistantMessage({
   ]);
 
   // Citation-linked markdown source. Memoized so the regex linkify only re-runs
-  // when this message's content or its sources change — not every render of an
-  // unrelated streaming turn. During streaming `sources` is empty, so this is
-  // just the raw content; once sources arrive the `[n]` markers become links.
+  // when this message's content or its documents change — not every render of an
+  // unrelated streaming turn. During streaming `documents` is empty, so this is
+  // just the raw content; once documents arrive the `[n]` markers become links.
   const linkedContent = useMemo(
-    () => linkifyCitations(contentString, sources),
-    [contentString, sources],
+    () => linkifyCitations(contentString, documents),
+    [contentString, documents],
   );
 
   // Deferring the markdown source keeps the browser responsive while an answer
@@ -267,7 +269,7 @@ export function AssistantMessage({
     hideToolCalls &&
     contentString.length === 0 &&
     (hasToolCalls || hasAnthropicToolCalls) &&
-    !(sources && sources.length > 0) &&
+    !(documents && documents.length > 0) &&
     !debug &&
     !interruptVisible &&
     !customComponents?.length &&
@@ -331,8 +333,8 @@ export function AssistantMessage({
               </>
             )}
 
-            {sources && sources.length > 0 && (
-              <CitedSources sources={sources} />
+            {documents && documents.length > 0 && (
+              <DocumentsAnalyzed documents={documents} />
             )}
 
             {debug && <DebugSection debug={debug} />}
