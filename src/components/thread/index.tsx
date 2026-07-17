@@ -12,7 +12,11 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
 import { FormEvent } from "react";
-import { getContentString, extractFollowUps } from "./utils";
+import {
+  getContentString,
+  extractFollowUps,
+  normalizeFollowUpForSubmit,
+} from "./utils";
 import { ACTIVITY_LABELS } from "@/lib/activity-labels";
 import { Button } from "../ui/button";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
@@ -432,9 +436,11 @@ export function Thread() {
 
   // Clicking a follow-up suggestion sends it immediately as a new turn,
   // through the same submit path as the composer (tool-call reconciliation
-  // preserved).
+  // preserved). Normalize any second-person "Do you want to …?" phrasing into
+  // the user's actual request first, so the agent doesn't misread it as a
+  // meta-question about its own preferences and refuse it.
   const handleFollowUpClick = (question: string) => {
-    handleSubmit(null, question);
+    handleSubmit(null, normalizeFollowUpForSubmit(question));
   };
 
   const handleRegenerate = (

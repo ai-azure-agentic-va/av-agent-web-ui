@@ -47,6 +47,37 @@ export function extractFollowUps(content: string): string[] {
   return out;
 }
 
+// A follow-up chip is worded as a question the assistant poses to the user
+// ("Do you want to add …?"). Older answers (and any stray generation) phrase it
+// in the second person, so sending it verbatim makes the agent read the "you"
+// as itself, treat it as a meta-question about ITS OWN preferences, and refuse
+// as out of scope. Strip that leading interrogative wrapper so the click
+// submits the user's actual request. Ordered longest-first so "do you want me
+// to" wins over "do you want".
+const FOLLOW_UP_WRAPPER_RE =
+  /^(?:do you want me to|do you want to|do you want|would you like me to|would you like to|would you like|do you need me to|do you need to|would you like for me to|want me to|shall i|should i|can i|may i)\b[\s,:-]*/i;
+
+/**
+ * Normalize a clicked follow-up suggestion into the request the user actually
+ * means before it is submitted as their next turn. If the suggestion opens with
+ * a second-person wrapper ("Do you want to …?"), drop it, drop the now-dangling
+ * trailing "?", and re-capitalize so the sent message reads as a clean request
+ * ("Add …"). Suggestions already phrased in the user's voice are returned
+ * unchanged (the wrapper never matches), so this is a no-op for the fixed
+ * backend prompt and a safety net for pre-existing threads.
+ */
+export function normalizeFollowUpForSubmit(question: string): string {
+  const q = question.trim();
+  const stripped = q.replace(FOLLOW_UP_WRAPPER_RE, "").trim();
+  // No wrapper matched → send the original verbatim.
+  if (stripped === q) return q;
+  const core = stripped.replace(/\s*\?+\s*$/, "").trim();
+  // Wrapper was the whole message (e.g. "Do you want to?") → nothing meaningful
+  // survives; fall back to the original rather than sending a bare "?".
+  if (core.length === 0) return q;
+  return core.charAt(0).toUpperCase() + core.slice(1);
+}
+
 /**
  * Turn inline `[n]` citation markers in the answer into clickable links to the
  * matching document in the "Referenced Sources" list (by its backend-assigned
