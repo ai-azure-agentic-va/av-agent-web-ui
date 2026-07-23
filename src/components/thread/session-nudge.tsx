@@ -13,8 +13,10 @@ import { cn } from "@/lib/utils";
  * keep responses fast and focused.
  *
  * The trigger is a simple human-turn count (robust and backend-free). Dismissal
- * is per-conversation — it resets whenever `threadId` changes so the nudge can
- * reappear in a new long chat.
+ * is per-turn — it only hides the nudge until the next message is sent, so once a
+ * conversation is past the threshold the reminder keeps resurfacing on every new
+ * turn. It also resets whenever `threadId` changes so it can reappear in a new
+ * long chat.
  */
 
 // Chats are expected to run 40+ turns comfortably, so the nudge stays quiet
@@ -36,14 +38,18 @@ export function SessionBoundaryNudge({
   threadId: string | null;
   onStartFresh: () => void;
 }) {
-  const [dismissed, setDismissed] = useState(false);
+  // Human-turn count at which the nudge was last dismissed. `null` means never
+  // dismissed in this thread. The nudge reappears as soon as `humanTurns` moves
+  // past this value, so dismissing only silences it until the next message.
+  const [dismissedAtTurn, setDismissedAtTurn] = useState<number | null>(null);
 
   // Reset dismissal on conversation switch so the nudge is per-thread.
   useEffect(() => {
-    setDismissed(false);
+    setDismissedAtTurn(null);
   }, [threadId]);
 
   const humanTurns = messages.filter((m) => m.type === "human").length;
+  const dismissed = dismissedAtTurn !== null && humanTurns <= dismissedAtTurn;
   if (dismissed || humanTurns < nudgeThreshold()) return null;
 
   return (
@@ -67,7 +73,7 @@ export function SessionBoundaryNudge({
       </Button>
       <button
         type="button"
-        onClick={() => setDismissed(true)}
+        onClick={() => setDismissedAtTurn(humanTurns)}
         className="text-muted-foreground hover:text-foreground"
         title="Dismiss"
         aria-label="Dismiss"
