@@ -10,6 +10,7 @@ import {
   getContentString,
   stripFollowUpSection,
   linkifyCitations,
+  documentsForCitations,
 } from "../utils";
 import { DocumentsAnalyzed } from "./documents-analyzed";
 import { BranchSwitcher, CommandBar } from "./shared";
@@ -176,6 +177,22 @@ export function AssistantMessage({
   const documents = message?.id
     ? thread.documentsMap?.[message.id]
     : undefined;
+  // Documents to resolve inline [n] citations against. Falls back to the nearest
+  // preceding turn's sources when THIS answer retrieved none of its own (e.g. a
+  // reformat/expand follow-up), so carried-forward markers still link. Kept
+  // separate from `documents` so the "Referenced Sources" panel below only shows
+  // when this turn actually searched.
+  const citationDocuments = useMemo(
+    () =>
+      message?.id
+        ? documentsForCitations(
+            message.id,
+            thread.messages,
+            thread.documentsMap ?? {},
+          )
+        : undefined,
+    [message?.id, thread.messages, thread.documentsMap],
+  );
   const debug = message?.id ? thread.debugMap?.[message.id] : undefined;
 
   // Host the LIVE activity disclosure on the current turn's last AI message, so
@@ -227,8 +244,8 @@ export function AssistantMessage({
   // unrelated streaming turn. During streaming `documents` is empty, so this is
   // just the raw content; once documents arrive the `[n]` markers become links.
   const linkedContent = useMemo(
-    () => linkifyCitations(contentString, documents),
-    [contentString, documents],
+    () => linkifyCitations(contentString, citationDocuments),
+    [contentString, citationDocuments],
   );
 
   // Deferring the markdown source keeps the browser responsive while an answer

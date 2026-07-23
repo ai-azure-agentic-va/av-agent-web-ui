@@ -88,27 +88,73 @@ export function linkifyCitations(
   documents?: { index?: number; url?: string }[],
 ): string {
   if (!content || !documents || documents.length === 0) return content;
+  // Every retrieved document's number is a VALID citation for this turn; the
+  // subset that also has a URL can be linked. We keep both so we can tell an
+  // invalid/hallucinated marker (drop it) from a real-but-unlinkable one (keep
+  // as plain text).
   const urlByIndex = new Map<number, string>();
+  const validIndices = new Set<number>();
   documents.forEach((d, i) => {
     const idx = d.index ?? i + 1;
+    validIndices.add(idx);
     if (d.url) urlByIndex.set(idx, d.url);
   });
-  if (urlByIndex.size === 0) return content;
-  // Match any marker number; an `[n]` with no matching document is left as plain
-  // text rather than dropped, so any model/backend mismatch degrades gracefully.
-  return content.replace(/\[(\d{1,3})\]/g, (match, num) => {
-    const url = urlByIndex.get(Number(num));
-    if (!url) return match;
-    // SharePoint/OneDrive URLs contain spaces (e.g. "/Shared Documents/") and
-    // parentheses, which BREAK a bare markdown destination `(url)` — CommonMark
-    // aborts the link and leaves the raw `[[n]](url)` in the text. Wrap the
-    // destination in <> (an angle-bracket destination may contain spaces and
-    // parens) and %20-encode spaces for a clean href; escape the only chars
-    // that would break the <> form itself.
-    const safeUrl = url.replace(/[<>]/g, encodeURIComponent).replace(/ /g, "%20");
-    // Escaped inner brackets so the link text renders as literal "[n]".
-    return `[\\[${num}\\]](<${safeUrl}>)`;
+  // We only reach here with a non-empty document set (guarded above), so any `[n]`
+  // whose number is NOT a retrieved document is a model/backend mismatch — an
+  // invented or content-copied marker. Match the marker plus any leading space so
+  // dropping an invalid one ("resolved [1] [9999].") leaves clean text; the digit
+  // count is unbounded so large numbers are evaluated rather than silently skipped.
+  return content.replace(/(\s*)\[(\d+)\]/g, (match, space: string, numStr: string) => {
+    const num = Number(numStr);
+    const url = urlByIndex.get(num);
+    if (url) {
+      // SharePoint/OneDrive URLs contain spaces (e.g. "/Shared Documents/") and
+      // parentheses, which BREAK a bare markdown destination `(url)` — CommonMark
+      // aborts the link and leaves the raw `[[n]](url)` in the text. Wrap the
+      // destination in <> (an angle-bracket destination may contain spaces and
+      // parens) and %20-encode spaces for a clean href; escape the only chars
+      // that would break the <> form itself.
+      const safeUrl = url
+        .replace(/[<>]/g, encodeURIComponent)
+        .replace(/ /g, "%20");
+      // Preserve any leading whitespace, then link the literal "[n]".
+      return `${space}[\\[${num}\\]](<${safeUrl}>)`;
+    }
+    // A real document for this turn but with no URL to link to: keep the marker
+    // as plain text so the citation signal survives.
+    if (validIndices.has(num)) return match;
+    // Not a document this turn retrieved — an invalid marker. Drop it (and its
+    // leading space) so it never renders as a stray raw bracket.
+    return "";
   });
+}
+
+/**
+ * Resolve the documents an answer's inline `[n]` citations should link against.
+ * Normally the answer's OWN retrieved set. But a follow-up turn that reformats or
+ * expands a prior answer WITHOUT running its own KB search has no set of its own,
+ * yet can still carry the prior turn's `[n]` markers — which would otherwise
+ * render as raw brackets. For that case we fall back to the nearest PRECEDING
+ * answer that did retrieve documents so those carried markers still resolve. This
+ * only affects citation linking; the "Referenced Sources" panel stays keyed to
+ * the answer's own set, so a turn that searched nothing shows no panel.
+ */
+export function documentsForCitations(
+  messageId: string,
+  messages: Message[],
+  documentsMap: Record<string, AnalyzedDocument[]>,
+): AnalyzedDocument[] | undefined {
+  const own = documentsMap[messageId];
+  if (own && own.length > 0) return own;
+  const pos = messages.findIndex((m) => m.id === messageId);
+  if (pos === -1) return own;
+  for (let i = pos - 1; i >= 0; i -= 1) {
+    const id = messages[i]?.id;
+    if (!id) continue;
+    const docs = documentsMap[id];
+    if (docs && docs.length > 0) return docs;
+  }
+  return own;
 }
 
 // The backend registers the KB search tool under this name; its ToolMessage
