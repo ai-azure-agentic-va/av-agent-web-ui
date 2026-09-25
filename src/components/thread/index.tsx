@@ -12,6 +12,7 @@ import {
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useStreamContext } from "@/providers/Stream";
+import { useClientConfig } from "@/providers/ClientConfig";
 import { FormEvent } from "react";
 import {
   getContentString,
@@ -21,10 +22,7 @@ import {
 import { ACTIVITY_LABELS } from "@/lib/activity-labels";
 import { Button } from "../ui/button";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
-import {
-  AssistantMessage,
-  AssistantMessageLoading,
-} from "./messages/ai";
+import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
 import {
   DO_NOT_RENDER_ID_PREFIX,
@@ -37,12 +35,10 @@ import {
   ArrowUp,
   PanelLeftClose,
   PanelLeft,
-  Settings,
   SquarePen,
   XIcon,
   LogOut,
 } from "lucide-react";
-import { SettingsPanel } from "./settings-panel";
 import { SessionBoundaryNudge } from "./session-nudge";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
@@ -117,7 +113,6 @@ type ChatInputProps = {
   setHideToolCalls: (v: boolean) => void;
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
   placeholder?: string;
-  onSettingsClick?: () => void;
   onStop?: () => void;
 };
 
@@ -130,9 +125,9 @@ function ChatInput({
   setHideToolCalls,
   textareaRef,
   placeholder = `Message ${APP_NAME}...`,
-  onSettingsClick,
   onStop,
 }: ChatInputProps) {
+  const clientConfig = useClientConfig();
   return (
     <div className="border-border bg-card relative rounded-2xl border shadow-sm">
       <form
@@ -165,7 +160,10 @@ function ChatInput({
             {stream.isLoading ? (
               <button
                 type="button"
-                onClick={() => { stream.stop(); onStop?.(); }}
+                onClick={() => {
+                  stream.stop();
+                  onStop?.();
+                }}
                 aria-label="Stop generating"
                 title="Stop generating"
                 className={cn(
@@ -210,42 +208,26 @@ function ChatInput({
             )}
           </div>
         </div>
-        <div className="border-border flex items-center justify-between border-t px-4 py-2">
-          <div className="flex items-center gap-4">
-            {/* When tool calls are force-hidden via NEXT_PUBLIC_HIDE_TOOL_CALLS,
-                this toggle is moot — omit it from the UI. */}
-            {process.env.NEXT_PUBLIC_HIDE_TOOL_CALLS !== "true" && (
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="render-tool-calls"
-                  checked={hideToolCalls ?? false}
-                  onCheckedChange={setHideToolCalls}
-                  className="scale-90"
-                />
-                <Label
-                  htmlFor="render-tool-calls"
-                  className="text-muted-foreground text-xs"
-                >
-                  Hide tool calls
-                </Label>
-              </div>
-            )}
-            {/* The settings button can be hidden entirely via
-                NEXT_PUBLIC_HIDE_SETTINGS_BUTTON. */}
-            {process.env.NEXT_PUBLIC_HIDE_SETTINGS_BUTTON !== "true" &&
-              onSettingsClick && (
-                <button
-                  type="button"
-                  onClick={onSettingsClick}
-                  className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs transition-colors"
-                  title="Open settings"
-                >
-                  <Settings className="h-3.5 w-3.5" />
-                  Settings
-                </button>
-              )}
+        {/* When tool calls are force-hidden via HIDE_TOOL_CALLS, this toggle
+            is moot — omit it (and its footer row) from the UI. */}
+        {!clientConfig.hideToolCalls && (
+          <div className="border-border flex items-center justify-between border-t px-4 py-2">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="render-tool-calls"
+                checked={hideToolCalls ?? false}
+                onCheckedChange={setHideToolCalls}
+                className="scale-90"
+              />
+              <Label
+                htmlFor="render-tool-calls"
+                className="text-muted-foreground text-xs"
+              >
+                Hide tool calls
+              </Label>
+            </div>
           </div>
-        </div>
+        )}
       </form>
     </div>
   );
@@ -328,7 +310,6 @@ export function Thread() {
 
   const [input, setInput] = useState("");
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [starterPrompts, setStarterPrompts] = useState<StarterPrompt[]>([]);
   const [starterPromptsLoading, setStarterPromptsLoading] = useState(true);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
@@ -636,7 +617,6 @@ export function Thread() {
                           setHideToolCalls={setHideToolCalls}
                           textareaRef={chatInputRef}
                           placeholder="How can I support you today?"
-                          onSettingsClick={() => setSettingsOpen(true)}
                         />
                       </div>
 
@@ -736,7 +716,8 @@ export function Thread() {
                       return (
                         <AssistantMessageLoading
                           thinkingStep={
-                            stream.thinkingStep || ACTIVITY_LABELS.gettingStarted
+                            stream.thinkingStep ||
+                            ACTIVITY_LABELS.gettingStarted
                           }
                         />
                       );
@@ -772,7 +753,6 @@ export function Thread() {
                   setHideToolCalls={setHideToolCalls}
                   textareaRef={chatInputRef}
                   placeholder="How can I support you today?"
-                  onSettingsClick={() => setSettingsOpen(true)}
                 />
               </div>
             </div>
@@ -858,11 +838,6 @@ export function Thread() {
           </div>
         </div>
       </div>
-
-      <SettingsPanel
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-      />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { parsePartialJson } from "@langchain/core/output_parsers";
 import { useStreamContext, ThinkingStep } from "@/providers/Stream";
+import { useClientConfig } from "@/providers/ClientConfig";
 import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
 import {
   getContentString,
@@ -132,11 +133,11 @@ export function AssistantMessage({
     "hideToolCalls",
     parseAsBoolean.withDefault(false),
   );
-  // Tool calls are an internal/debug surface. When NEXT_PUBLIC_HIDE_TOOL_CALLS
-  // is set (e.g. in production) they are force-hidden; otherwise the composer
-  // switch toggles them.
-  const hideToolCalls =
-    process.env.NEXT_PUBLIC_HIDE_TOOL_CALLS === "true" || hideToolCallsToggle;
+  // Tool calls are an internal/debug surface. When HIDE_TOOL_CALLS is set
+  // (e.g. in production) they are force-hidden; otherwise the composer switch
+  // toggles them.
+  const clientConfig = useClientConfig();
+  const hideToolCalls = clientConfig.hideToolCalls || hideToolCallsToggle;
 
   const thread = useStreamContext();
   const isLastMessage =
@@ -173,9 +174,7 @@ export function AssistantMessage({
   // own). Used only to decide whether an otherwise-empty tool-call message is worth
   // rendering (see the early return below); the visible panel uses the cumulative
   // set instead.
-  const documents = message?.id
-    ? thread.documentsMap?.[message.id]
-    : undefined;
+  const documents = message?.id ? thread.documentsMap?.[message.id] : undefined;
   // Cumulative referenced sources for THIS answer — and the set inline [n] markers
   // resolve against. The backend numbers documents append-only across the WHOLE
   // conversation, so an answer's own set is already the running list as of that
@@ -243,7 +242,6 @@ export function AssistantMessage({
     [contentString, citationDocuments],
   );
 
-
   // The run_id for feedback comes from the `done` SSE event payload,
   // stored on lastDonePayload by Stream.tsx
   const lastDonePayload = thread.lastDonePayload as Record<
@@ -309,7 +307,10 @@ export function AssistantMessage({
         ) : (
           <>
             {showLiveThought ? (
-              <ThoughtDisclosure steps={thread.thinkingSteps} live />
+              <ThoughtDisclosure
+                steps={thread.thinkingSteps}
+                live
+              />
             ) : historicalSteps ? (
               <ThoughtDisclosure steps={historicalSteps} />
             ) : null}
@@ -362,9 +363,7 @@ export function AssistantMessage({
             />
 
             {/* Toolbar row: thumbs up, thumbs down, copy, refresh */}
-            <div
-              className="flex items-center gap-2"
-            >
+            <div className="flex items-center gap-2">
               <BranchSwitcher
                 branch={meta?.branch}
                 branchOptions={meta?.branchOptions}
@@ -533,4 +532,3 @@ export function AssistantMessageLoading({
     </div>
   );
 }
-
