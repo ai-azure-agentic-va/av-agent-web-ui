@@ -884,8 +884,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const thinkingStep = liveThinkingSteps.at(-1)?.label ?? "";
 
   // Documents for turns opened from history: the live `documents` custom event
-  // never replays, but each ai_search ToolMessage persists its retrieved set on
-  // `.artifact`, so we rebuild the per-answer map from the persisted messages.
+  // never replays, but each ai_search ToolMessage (and each `task` result whose
+  // subagent searched) persists its retrieved set on `.artifact`, so we rebuild
+  // the per-answer map from the persisted messages.
   // Live state (documentsMap, committed in onFinish) is spread last so it wins
   // for the active turn on any shared answer-message id.
   const derivedDocumentsMap = useMemo(

@@ -192,9 +192,11 @@ export function buildCitationDocumentsMap(
   return map;
 }
 
-// The backend registers the KB search tool under this name; its ToolMessage
-// carries the turn's retrieved documents on `.artifact` (see ai_search_tool).
-const AI_SEARCH_TOOL_NAME = "ai_search_tool";
+// ToolMessages that carry the turn's retrieved documents on `.artifact`: the KB
+// search tool's own (see ai_search_tool), and a subagent delegation's (`task`),
+// which the backend gives the documents its subagent's searches found (see
+// SubagentSourcesMiddleware).
+const SOURCE_TOOL_NAMES = new Set(["ai_search_tool", "task"]);
 
 /** Read the documents list off a ToolMessage artifact, tolerating either the
  * bare-array shape the tool returns or a `{ documents: [...] }` wrapper. Returns
@@ -216,7 +218,8 @@ function documentsFromArtifact(artifact: unknown): AnalyzedDocument[] {
  * Rebuild the per-answer documents map from PERSISTED messages — the durable
  * source for threads opened from history, where the live `documents` custom
  * stream event never replays. `ai_search_tool` persists its retrieved-document
- * set on the ToolMessage `.artifact`, so we walk each turn (a `human` message
+ * set on the ToolMessage `.artifact` (as does a `task` result whose subagent
+ * searched the KB), so we walk each turn (a `human` message
  * starts a new one), union that turn's tool artifacts deduped by the backend's
  * turn-stable `index`, and key the result under the turn's answer (its last
  * text-bearing AI) message id — the same key the live path and ai.tsx use, so
@@ -258,7 +261,10 @@ export function deriveDocumentsFromMessages(
       if (m.id && getContentString(m.content).trim() !== "") answerId = m.id;
       continue;
     }
-    if (m.type === "tool" && (m as ToolMessage).name === AI_SEARCH_TOOL_NAME) {
+    if (
+      m.type === "tool" &&
+      SOURCE_TOOL_NAMES.has((m as ToolMessage).name ?? "")
+    ) {
       for (const doc of documentsFromArtifact((m as ToolMessage).artifact)) {
         const idx = doc.index;
         // First payload for an index wins; the backend records a document once
