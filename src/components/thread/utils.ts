@@ -195,7 +195,7 @@ export function buildCitationDocumentsMap(
 // ToolMessages that carry the turn's retrieved documents on `.artifact`: the KB
 // search tool's own (see ai_search_tool), and a subagent delegation's (`task`),
 // which the backend gives the documents its subagent's searches found (see
-// SubagentSourcesMiddleware).
+// CitationsMiddleware).
 const SOURCE_TOOL_NAMES = new Set(["ai_search_tool", "task"]);
 
 /** Read the documents list off a ToolMessage artifact, tolerating either the
