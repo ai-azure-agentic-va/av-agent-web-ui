@@ -21,6 +21,15 @@
 export const UTC_TIMESTAMP_RE =
   /\b(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)\s*UTC\b/gi;
 
+// A second zone right after the "UTC" — "2026-06-02 04:00 UTC CDT", "… UTC
+// (CDT)", "… UTC -05:00" — means the label is wrong: the digits are a time the
+// user gave in their own zone, labelled UTC by the model. Converting it would
+// shift it by that zone's offset (4 am CDT showed as 23:00 the day before,
+// still followed by "CDT"), so such a time is left exactly as written. Same
+// line only, and case-sensitive: zone abbreviations are written in capitals.
+const ZONE_AFTER_UTC_RE =
+  /^[ \t]*[([]?[ \t]*(?:[ECMP][SD]?T|AK[SD]T|HST|IST|BST|CES?T|GMT|[+-]\d{2}:\d{2})(?![A-Za-z])/;
+
 /** Build a parseable ISO-8601 UTC string from the captured date/time parts. */
 export function toUtcIso(dateStr: string, timeStr: string): string {
   const time = timeStr.length === 5 ? `${timeStr}:00` : timeStr; // ensure seconds
@@ -94,6 +103,9 @@ export function splitTextForTimestamps(value: string): HastNode[] {
   let match: RegExpExecArray | null;
   while ((match = UTC_TIMESTAMP_RE.exec(value)) !== null) {
     const [full, dateStr, timeStr] = match;
+    if (ZONE_AFTER_UTC_RE.test(value.slice(match.index + full.length))) {
+      continue; // stays in the surrounding text, unconverted
+    }
     if (match.index > last) {
       out.push({ type: "text", value: value.slice(last, match.index) });
     }
