@@ -1,7 +1,7 @@
 {
   "name": "open-web-ui",
   "private": true,
-  "version": "3.2.0",
+  "version": "3.3.0",
   "type": "module",
   "scripts": {
     "dev": "next dev",
@@ -10,7 +10,8 @@
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test": "vitest run"
   },
   "//": "Versions are EXACT-PINNED (no ^ / ~). Docker runs `pnpm install --frozen-lockfile`, so the committed pnpm-lock.yaml + these exact specifiers make image builds reproducible instead of floating within caret ranges on each rebuild. Bump deliberately, then run `pnpm install` to refresh the lockfile. Runtime/UI deps are aligned to the upstream fork source github.com/langchain-ai/agent-chat-ui (its current tested set, verified 2026-08-11). The @langchain SDK cluster + React are at-or-above upstream. Next is held on the 15.x line by choice (16 is a breaking major, and upstream is also on 15.5.x). The ESLint/TS lint-tooling cluster (eslint-config-next, eslint-plugin-react-hooks, globals, typescript, typescript-eslint) is intentionally held BELOW upstream: `next build` has no eslint.ignoreDuringBuilds, so those majors (react-hooks 5->7, globals 15->17, eslint-config-next 15->16) would risk failing the build's lint gate for no runtime benefit — bump them as a separate, tested step.",
   "dependencies": {
@@ -59,12 +60,15 @@
   "devDependencies": {
     "@eslint/js": "9.27.0",
     "@tailwindcss/postcss": "4.3.3",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
     "@types/lodash": "4.17.25",
     "@types/node": "22.15.18",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@types/react-syntax-highlighter": "15.5.13",
     "@types/uuid": "11.0.0",
+    "@vitejs/plugin-react": "6.1.2",
     "autoprefixer": "10.5.4",
     "dotenv": "16.5.0",
     "eslint": "9.27.0",
@@ -72,6 +76,7 @@
     "eslint-plugin-react-hooks": "5.2.0",
     "eslint-plugin-react-refresh": "0.4.20",
     "globals": "15.15.0",
+    "jsdom": "29.1.1",
     "next": "15.5.26",
     "postcss": "8.5.26",
     "prettier": "3.9.6",
@@ -79,7 +84,9 @@
     "tailwind-scrollbar": "4.0.2",
     "tailwindcss": "4.3.3",
     "typescript": "5.7.3",
-    "typescript-eslint": "8.32.1"
+    "typescript-eslint": "8.32.1",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
   },
   "overrides": {
     "react-is": "^19.0.0-rc-69d4b800-20241021"

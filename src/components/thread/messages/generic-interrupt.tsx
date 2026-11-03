@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown } from "lucide-react";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 function isComplexValue(value: any): boolean {
   return Array.isArray(value) || (typeof value === "object" && value !== null);
@@ -19,7 +21,7 @@ function isUrl(value: any): boolean {
 function renderInterruptStateItem(value: any): React.ReactNode {
   if (isComplexValue(value)) {
     return (
-      <code className="rounded bg-gray-50 px-2 py-1 font-mono text-sm">
+      <code className="bg-muted rounded-[2px] px-1.5 py-0.5 font-mono text-xs leading-5 whitespace-pre-wrap">
         {JSON.stringify(value, null, 2)}
       </code>
     );
@@ -29,7 +31,7 @@ function renderInterruptStateItem(value: any): React.ReactNode {
         href={value}
         target="_blank"
         rel="noopener noreferrer"
-        className="break-all text-blue-600 underline hover:text-blue-800"
+        className="text-foreground decoration-signal/60 hover:decoration-signal break-all underline underline-offset-4"
       >
         {value}
       </a>
@@ -92,19 +94,21 @@ export function GenericInterruptView({
   const displayEntries = processEntries();
 
   return (
-    <div className="overflow-hidden rounded-lg border border-gray-200">
-      <div className="border-b border-gray-200 bg-gray-50 px-4 py-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-medium text-gray-900">Human Interrupt</h3>
-        </div>
-      </div>
+    // Black outline: the agent is waiting on the person.
+    <Card
+      tone="attention"
+      className="overflow-hidden"
+    >
+      <CardHeader>
+        <CardTitle>Human interrupt</CardTitle>
+      </CardHeader>
       <motion.div
-        className="min-w-full bg-gray-100"
+        className="min-w-full"
         initial={false}
         animate={{ height: "auto" }}
         transition={{ duration: 0.3 }}
       >
-        <div className="p-3">
+        <div className="py-1">
           <AnimatePresence
             mode="wait"
             initial={false}
@@ -120,18 +124,18 @@ export function GenericInterruptView({
                 overflow: "auto",
               }}
             >
-              <table className="min-w-full divide-y divide-gray-200">
-                <tbody className="divide-y divide-gray-200">
+              <table className="divide-border min-w-full divide-y">
+                <tbody className="divide-border divide-y">
                   {displayEntries.map((item, argIdx) => {
                     const [key, value] = Array.isArray(interrupt)
                       ? [argIdx.toString(), item]
                       : (item as [string, any]);
                     return (
                       <tr key={argIdx}>
-                        <td className="px-4 py-2 text-sm font-medium whitespace-nowrap text-gray-900">
+                        <td className="text-foreground py-2.5 pr-4 pl-4 align-top text-sm font-medium whitespace-nowrap">
                           {key}
                         </td>
-                        <td className="px-4 py-2 text-sm text-gray-500">
+                        <td className="text-muted-foreground py-2.5 pr-4 text-sm">
                           {renderInterruptStateItem(value)}
                         </td>
                       </tr>
@@ -144,17 +148,23 @@ export function GenericInterruptView({
         </div>
         {(shouldTruncate ||
           (Array.isArray(interrupt) && interrupt.length > 5)) && (
-          <motion.button
+          <button
+            type="button"
             onClick={() => setIsExpanded(!isExpanded)}
-            className="flex w-full cursor-pointer items-center justify-center border-t-[1px] border-gray-200 py-2 text-gray-500 transition-all duration-200 ease-in-out hover:bg-gray-50 hover:text-gray-600"
-            initial={{ scale: 1 }}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
+            aria-expanded={isExpanded}
+            className="border-border text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring flex min-h-10 w-full cursor-pointer items-center justify-center gap-1.5 border-t text-[13px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
           >
-            {isExpanded ? <ChevronUp /> : <ChevronDown />}
-          </motion.button>
+            {isExpanded ? "Show less" : "Show more"}
+            <ChevronDown
+              aria-hidden="true"
+              className={cn(
+                "size-4 transition-transform",
+                isExpanded && "rotate-180",
+              )}
+            />
+          </button>
         )}
       </motion.div>
-    </div>
+    </Card>
   );
 }

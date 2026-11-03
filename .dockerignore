@@ -4,3 +4,5 @@ node_modules
 .env
 *.md
 mock-langgraph-api
+agent-chat-package
+video-kit

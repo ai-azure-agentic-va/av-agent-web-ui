@@ -1,14 +1,18 @@
 import { ToolCall } from "@langchain/core/messages/tool";
 import { unknownToPrettyDate } from "../utils";
+import { cardVariants } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 export function ToolCallTable({ toolCall }: { toolCall: ToolCall }) {
   return (
-    <div className="max-w-full min-w-[300px] overflow-hidden rounded-lg border">
+    <div
+      className={cn(cardVariants(), "max-w-full min-w-[300px] overflow-hidden")}
+    >
       <table className="w-full border-collapse">
         <thead>
           <tr>
             <th
-              className="bg-gray-100 px-2 py-0 text-left text-sm"
+              className="bg-muted px-3 py-2 text-left text-[13px] font-semibold"
               colSpan={2}
             >
               {toolCall.name}
@@ -39,8 +43,12 @@ export function ToolCallTable({ toolCall }: { toolCall: ToolCall }) {
                 key={key}
                 className="border-t"
               >
-                <td className="w-1/3 px-2 py-1 text-xs font-medium">{key}</td>
-                <td className="px-2 py-1 font-mono text-xs">{valueStr}</td>
+                <td className="text-muted-foreground w-1/3 px-3 py-1.5 align-top text-xs font-medium">
+                  {key}
+                </td>
+                <td className="px-3 py-1.5 font-mono text-xs leading-5 break-words">
+                  {valueStr}
+                </td>
               </tr>
             );
           })}

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { useId, useState } from "react";
+import { ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { AnalyzedDocument } from "@/providers/Stream";
@@ -12,34 +12,48 @@ function formatModified(value?: string): string | null {
   return d.toISOString().slice(0, 10);
 }
 
+function docLabel(doc: AnalyzedDocument, idx: number): string {
+  return doc.title || doc.file_name || `Document ${idx}`;
+}
+
 /**
- * "Referenced Sources" — the CUMULATIVE set of documents AI Search has surfaced
- * across the conversation up to this answer (append-only, chunks collapsed to
- * documents), numbered 1..n by the backend. Inline [n] citation markers in the
- * answer link to the matching entry here.
+ * The answer's source credit: a black strap that closes the answer, led by the
+ * documents this answer actually cites, over the CUMULATIVE set AI Search has
+ * surfaced across the conversation (append-only, numbered 1..n by the backend).
+ * Inline [n] markers in the answer use the same red numerals as the credit.
  *
- * COLLAPSED BY DEFAULT: the list is append-only and can grow to hundreds of links
- * over a long conversation, so it opens closed with just a "Referenced Sources (N)"
- * header the user can expand. Each answer's panel owns its expand state locally.
+ * COLLAPSED BY DEFAULT: the full list can grow to hundreds of links over a long
+ * conversation, so it opens only on request. Each answer owns its expand state.
  */
 export function DocumentsAnalyzed({
   documents,
+  cited = [],
 }: {
   documents: AnalyzedDocument[];
+  cited?: number[];
 }) {
   const [expanded, setExpanded] = useState(false);
+  const panelId = useId();
 
   if (!documents || documents.length === 0) return null;
 
+  const byIndex = new Map(documents.map((d, i) => [d.index ?? i + 1, d]));
+  const citedSet = new Set(cited);
+  const lead = cited.slice(0, 3).flatMap((n) => {
+    const doc = byIndex.get(n);
+    return doc ? [{ n, doc }] : [];
+  });
+
   return (
-    <div className="border-border mt-3 border-t pt-3 text-sm">
+    <div className="mt-1">
       <button
         type="button"
         aria-expanded={expanded}
+        aria-controls={panelId}
         // Toggle on pointer-down, not click: while the answer streams,
         // StickToBottom auto-scrolls the list, which can move this button between
-        // mousedown and mouseup so the derived `click` is unreliable (mirrors
-        // ThoughtDisclosure). Keyboard handled separately below.
+        // mousedown and mouseup so the derived `click` is unreliable (mirrors the
+        // trace disclosure). Keyboard handled separately below.
         onPointerDown={(e) => {
           e.preventDefault();
           setExpanded((v) => !v);
@@ -50,47 +64,88 @@ export function DocumentsAnalyzed({
             setExpanded((v) => !v);
           }
         }}
-        className="text-foreground hover:text-primary flex items-center gap-1.5 font-semibold transition-colors"
+        className="bg-primary text-primary-foreground corner-step focus-visible:ring-ring flex min-h-9 w-full items-stretch overflow-hidden text-left text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
       >
-        <ChevronRight
-          className={cn(
-            "h-3.5 w-3.5 shrink-0 transition-transform",
-            expanded && "rotate-90",
+        <span className="bg-ink-raised flex shrink-0 items-center px-3 font-semibold">
+          Sources
+        </span>
+        <span className="flex min-w-0 flex-1 items-center gap-5 px-3">
+          {lead.length > 0 ? (
+            lead.map(({ n, doc }, i) => (
+              <span
+                key={n}
+                className={cn(
+                  "min-w-0 items-center gap-1.5",
+                  // Phones show the first credit only; the count says the rest.
+                  i === 0 ? "flex" : "hidden md:flex",
+                )}
+              >
+                <span className="text-signal text-xs font-medium">{n}</span>
+                <span className="max-w-[15rem] truncate">
+                  {docLabel(doc, n)}
+                </span>
+              </span>
+            ))
+          ) : (
+            <span>Referenced sources</span>
           )}
-        />
-        Referenced Sources ({documents.length})
+        </span>
+        <span className="flex shrink-0 items-center gap-2 px-3 text-xs">
+          <span>
+            {documents.length}
+            <span className="sr-only"> sources</span>
+          </span>
+          <ChevronDown
+            aria-hidden="true"
+            className={cn(
+              "size-4 transition-transform",
+              expanded && "rotate-180",
+            )}
+          />
+        </span>
       </button>
       {expanded && (
-        <ol className="mt-2 space-y-1">
+        <ol
+          id={panelId}
+          className="divide-border border-border divide-y border-b text-sm"
+        >
           {documents.map((doc, i) => {
             const idx = doc.index ?? i + 1;
-            const label = doc.title || doc.file_name || `Document ${idx}`;
+            const label = docLabel(doc, idx);
             const modified = formatModified(doc.updated_at);
+            const isCited = citedSet.has(idx);
             return (
               <li
                 key={`${idx}-${i}`}
-                className="text-foreground"
+                className="grid grid-cols-[2.25rem_1fr] gap-x-2 py-2.5"
               >
-                <span className="text-muted-foreground mr-1 font-mono">
-                  [{idx}]
+                <span
+                  className={cn(
+                    "pt-0.5 text-right text-xs font-medium",
+                    isCited ? "text-signal" : "text-muted-foreground",
+                  )}
+                >
+                  {idx}
                 </span>
-                {doc.url ? (
-                  <a
-                    href={doc.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary break-all hover:underline"
-                  >
-                    {label}
-                  </a>
-                ) : (
-                  <span className="break-all font-medium">{label}</span>
-                )}
-                {modified && (
-                  <span className="text-muted-foreground ml-1">
-                    (Last modified: {modified})
-                  </span>
-                )}
+                <span className="min-w-0">
+                  {doc.url ? (
+                    <a
+                      href={doc.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-foreground decoration-signal/50 hover:decoration-signal focus-visible:ring-ring rounded-[2px] break-words underline decoration-1 underline-offset-4 transition-colors outline-none focus-visible:ring-2"
+                    >
+                      {label}
+                    </a>
+                  ) : (
+                    <span className="break-words">{label}</span>
+                  )}
+                  {modified && (
+                    <span className="text-muted-foreground mt-0.5 block text-xs">
+                      Updated {modified}
+                    </span>
+                  )}
+                </span>
               </li>
             );
           })}

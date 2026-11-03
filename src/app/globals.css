@@ -4,105 +4,71 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* IVY. Black and white carry the layout;
+   red is the signal: live state, citations and focus. The neutrals are
+   pure grey so they never tint the
+   accent colours. The app is light-only (forcedTheme in layout.tsx). */
 :root {
-  /* Professional Theme */
-  --background: oklch(0.99 0.002 250);
-  --foreground: oklch(0.15 0.02 250);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.15 0.02 250);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.15 0.02 250);
-  --primary: oklch(0.35 0.12 250);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.96 0.01 250);
-  --secondary-foreground: oklch(0.25 0.05 250);
-  --muted: oklch(0.97 0.005 250);
-  --muted-foreground: oklch(0.5 0.02 250);
-  --accent: oklch(0.94 0.02 250);
-  --accent-foreground: oklch(0.25 0.05 250);
-  --destructive: oklch(0.55 0.22 25);
-  --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.91 0.01 250);
-  --input: oklch(0.91 0.01 250);
-  --ring: oklch(0.35 0.12 250);
-  --radius: 0.75rem;
+  --background: #ffffff;
+  --foreground: #000000;
+  --card: #ffffff;
+  --card-foreground: #000000;
+  --popover: #ffffff;
+  --popover-foreground: #000000;
+  --primary: #000000;
+  --primary-foreground: #ffffff;
+  --secondary: #f3f3f3;
+  --secondary-foreground: #000000;
+  --muted: #f3f3f3;
+  /* 7.4:1 on white, 6.6:1 on --muted. */
+  --muted-foreground: #555555;
+  --accent: #f3f3f3;
+  --accent-foreground: #000000;
+  /* Signal red. 4.65:1 on white: fine for text at body size and up. */
+  --signal: #e90130;
+  --signal-foreground: #ffffff;
+  /* Red for text on the red tint, where #e90130 would drop below 4.5:1. */
+  --signal-ink: #b00024;
+  --signal-tint: #fdebef;
+  /* The one lifted near-black, for a segment raised off a black surface: the
+     "Sources" label on the credit strap and the code block's language bar. */
+  --ink-raised: #262626;
+  --destructive: #e90130;
+  --destructive-foreground: #ffffff;
+  /* No green in the palette: confirmations are black. */
+  --success: #000000;
+  --success-foreground: #ffffff;
+  /* Hairlines for layout; --input is the 3:1 boundary for form controls. */
+  --border: #e3e3e3;
+  --input: #8a8a8a;
+  /* The chain's rail from question to answer: a step darker than a hairline
+     so it reads as a line, still decorative (no contrast duty). */
+  --rail: #c8c8c8;
+  --ring: #e90130;
+  --radius: 0.625rem;
 
-  /* Custom colors for messages */
-  --user-message: oklch(0.35 0.12 250);
-  --user-message-foreground: oklch(0.99 0 0);
-  --assistant-message: oklch(0.97 0.005 250);
-  --assistant-message-foreground: oklch(0.15 0.02 250);
-  --tool-call: oklch(0.95 0.03 180);
-  --tool-call-foreground: oklch(0.25 0.08 180);
-  --tool-call-border: oklch(0.85 0.05 180);
+  --sidebar: #ffffff;
+  --sidebar-foreground: #000000;
+  --sidebar-primary: #000000;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f3f3f3;
+  --sidebar-accent-foreground: #000000;
+  --sidebar-border: #e3e3e3;
+  --sidebar-ring: #e90130;
 
-  /* Sidebar */
-  --sidebar: oklch(0.98 0.005 250);
-  --sidebar-foreground: oklch(0.15 0.02 250);
-  --sidebar-primary: oklch(0.35 0.12 250);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.94 0.02 250);
-  --sidebar-accent-foreground: oklch(0.25 0.05 250);
-  --sidebar-border: oklch(0.91 0.01 250);
-  --sidebar-ring: oklch(0.35 0.12 250);
-
-  /* Charts */
-  --chart-1: oklch(0.35 0.12 250);
-  --chart-2: oklch(0.55 0.15 180);
-  --chart-3: oklch(0.65 0.12 140);
-  --chart-4: oklch(0.75 0.15 80);
-  --chart-5: oklch(0.6 0.2 30);
-}
-
-.dark {
-  --background: oklch(0.13 0.02 250);
-  --foreground: oklch(0.95 0.005 250);
-  --card: oklch(0.17 0.02 250);
-  --card-foreground: oklch(0.95 0.005 250);
-  --popover: oklch(0.17 0.02 250);
-  --popover-foreground: oklch(0.95 0.005 250);
-  --primary: oklch(0.65 0.15 250);
-  --primary-foreground: oklch(0.13 0.02 250);
-  --secondary: oklch(0.22 0.02 250);
-  --secondary-foreground: oklch(0.95 0.005 250);
-  --muted: oklch(0.22 0.02 250);
-  --muted-foreground: oklch(0.65 0.02 250);
-  --accent: oklch(0.25 0.03 250);
-  --accent-foreground: oklch(0.95 0.005 250);
-  --destructive: oklch(0.5 0.2 25);
-  --destructive-foreground: oklch(0.95 0 0);
-  --border: oklch(0.25 0.02 250);
-  --input: oklch(0.25 0.02 250);
-  --ring: oklch(0.65 0.15 250);
-
-  /* Custom colors for messages */
-  --user-message: oklch(0.5 0.12 250);
-  --user-message-foreground: oklch(0.99 0 0);
-  --assistant-message: oklch(0.22 0.02 250);
-  --assistant-message-foreground: oklch(0.95 0.005 250);
-  --tool-call: oklch(0.2 0.04 180);
-  --tool-call-foreground: oklch(0.75 0.1 180);
-  --tool-call-border: oklch(0.3 0.06 180);
-
-  /* Sidebar */
-  --sidebar: oklch(0.15 0.02 250);
-  --sidebar-foreground: oklch(0.95 0.005 250);
-  --sidebar-primary: oklch(0.65 0.15 250);
-  --sidebar-primary-foreground: oklch(0.13 0.02 250);
-  --sidebar-accent: oklch(0.25 0.03 250);
-  --sidebar-accent-foreground: oklch(0.95 0.005 250);
-  --sidebar-border: oklch(0.25 0.02 250);
-  --sidebar-ring: oklch(0.65 0.15 250);
-
-  /* Charts */
-  --chart-1: oklch(0.65 0.15 250);
-  --chart-2: oklch(0.65 0.15 180);
-  --chart-3: oklch(0.7 0.15 140);
-  --chart-4: oklch(0.75 0.15 80);
-  --chart-5: oklch(0.65 0.2 30);
+  --chart-1: #000000;
+  --chart-2: #e90130;
+  --chart-3: #555555;
+  --chart-4: #8a8a8a;
+  --chart-5: #b00024;
 }
 
 @theme inline {
+  --font-sans: var(--font-lexend-deca), ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    var(--font-roboto-mono), ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -117,9 +83,17 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-signal: var(--signal);
+  --color-signal-foreground: var(--signal-foreground);
+  --color-signal-ink: var(--signal-ink);
+  --color-signal-tint: var(--signal-tint);
+  --color-ink-raised: var(--ink-raised);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
   --color-border: var(--border);
+  --color-rail: var(--rail);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-chart-1: var(--chart-1);
@@ -139,15 +113,6 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
-
-  /* Custom message colors */
-  --color-user-message: var(--user-message);
-  --color-user-message-foreground: var(--user-message-foreground);
-  --color-assistant-message: var(--assistant-message);
-  --color-assistant-message-foreground: var(--assistant-message-foreground);
-  --color-tool-call: var(--tool-call);
-  --color-tool-call-foreground: var(--tool-call-foreground);
-  --color-tool-call-border: var(--tool-call-border);
 }
 
 @layer base {
@@ -156,25 +121,46 @@
   }
 
   body {
-    @apply bg-background text-foreground antialiased;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings:
+      "rlig" 1,
+      "calt" 1;
   }
 
-  .font-satoshi {
-    font-family: "Satoshi", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  ::selection {
+    background-color: color-mix(in srgb, var(--signal) 18%, transparent);
   }
 
-  /* Use Geist Mono for code elements */
+  /* Text that sits on black or red needs its own selection tint. */
+  .bg-primary ::selection,
+  .bg-signal ::selection {
+    background-color: color-mix(in srgb, #ffffff 35%, transparent);
+  }
+
+  textarea,
+  input {
+    caret-color: var(--signal);
+  }
+
+  /* Roboto Mono is for code only; every other string, numbers included, is
+     Lexend Deca. @theme inline doesn't emit --font-mono, so point at the face
+     directly. */
   code,
-  kbd,
   pre,
   samp {
-    font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono",
-      Menlo, Consolas, "Liberation Mono", monospace;
+    font-family: var(--font-roboto-mono), ui-monospace, Menlo, monospace;
   }
 }
 
 @layer utilities {
+  /* The stepped corner: square-ish on three corners, one soft step at
+     top-right. The one shape for every surface: cards, the composer, the
+     credit strap, code blocks, tables and toasts. Controls take the 8px
+     radius instead (rounded-md); pills and marks are round. */
+  .corner-step {
+    border-radius: 2px 14px 2px 2px;
+  }
+
   .shadow-inner-right {
     box-shadow: inset -9px 0 6px -1px rgb(0 0 0 / 0.02);
   }
@@ -184,10 +170,11 @@
   }
 }
 
-/* Custom scrollbar styles */
+/* Custom scrollbar styles. `opacity` has no effect on scrollbar pseudo-elements,
+   so the thumb's softness comes from a translucent color instead. */
 .scrollbar-thin {
   scrollbar-width: thin;
-  scrollbar-color: var(--muted-foreground) transparent;
+  scrollbar-color: color-mix(in srgb, #000 22%, transparent) transparent;
 }
 
 .scrollbar-thin::-webkit-scrollbar {
@@ -200,39 +187,19 @@
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background-color: var(--muted-foreground);
-  border-radius: 3px;
-  opacity: 0.3;
+  background-color: color-mix(in srgb, #000 22%, transparent);
+  border-radius: 2px;
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  opacity: 0.5;
+  background-color: color-mix(in srgb, #000 40%, transparent);
 }
 
-/* Smooth transitions for theme changes */
-html {
-  transition: background-color 0.3s ease, color 0.3s ease;
-}
-
-/* Tool call animation */
-@keyframes tool-pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.7;
-  }
-}
-
-.tool-running {
-  animation: tool-pulse 2s ease-in-out infinite;
-}
-
-/* Message fade in animation */
-@keyframes message-fade-in {
+/* Messages arrive once, from already-legible: a short rise, no fade from zero. */
+@keyframes message-in {
   from {
-    opacity: 0;
-    transform: translateY(8px);
+    opacity: 0.4;
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -241,22 +208,104 @@ html {
 }
 
 .message-animate {
-  animation: message-fade-in 0.3s ease-out;
+  animation: message-in 0.32s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@keyframes wave-bar {
-  0%, 100% { height: 4px; }
-  50%      { height: 14px; }
+/* Live state: the chain's running bead, the U while it writes the answer and
+   the sign-in line. The only things on screen that pulse. */
+@keyframes live-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
-.wave-bar {
-  display: block;
-  width: 2.5px;
-  border-radius: 1px;
-  background-color: #0F3D70;
-  animation: wave-bar 0.9s ease-in-out infinite;
+.live-dot {
+  animation: live-dot 1.4s ease-in-out infinite;
 }
-.wave-bar:nth-child(1) { animation-delay: -0.40s; }
-.wave-bar:nth-child(2) { animation-delay: -0.25s; }
-.wave-bar:nth-child(3) { animation-delay: -0.10s; }
-.wave-bar:nth-child(4) { animation-delay: -0.25s; }
+
+/* The chain's open end while the agent works: the rail continues as dashes
+   that fade out, so the turn visibly has a start but no end yet. */
+.chain-tail {
+  background-image: linear-gradient(to bottom, var(--rail) 60%, transparent 0);
+  background-size: 2px 5px;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+
+/* A new step rising into the chain. */
+@keyframes step-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.step-in {
+  animation: step-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* The prompt library sliding out of the composer, from already-legible. It
+   rises when it opens above the composer and drops when it opens below. */
+@keyframes slide-card {
+  from {
+    opacity: 0.4;
+    transform: translateY(var(--slide-from, 8px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.slide-card {
+  animation: slide-card 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.slide-card[data-side="bottom"] {
+  --slide-from: -8px;
+}
+
+/* Inline citation marker, e.g. the "[1]" in an answer that links to a source.
+   The same red numeral opens the answer's Sources credit, so the code and the
+   credit read as one. */
+.citation {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35em;
+  margin-inline: 0.15em;
+  padding: 0 0.3em;
+  border: 1px solid currentColor;
+  border-radius: 2px 6px 2px 2px;
+  font-size: 0.68em;
+  font-weight: 500;
+  line-height: 1.45;
+  vertical-align: 0.3em;
+  text-decoration: none;
+  color: var(--signal);
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out;
+}
+
+.citation:hover,
+.citation:focus-visible {
+  color: var(--signal-foreground);
+  background-color: var(--signal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-animate,
+  .live-dot,
+  .step-in,
+  .slide-card {
+    animation: none;
+  }
+}

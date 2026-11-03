@@ -9,7 +9,15 @@ import React from "react";
 
 export default function ChatUI(): React.ReactNode {
   return (
-    <React.Suspense fallback={<div>Loading...</div>}>
+    <React.Suspense
+      fallback={
+        <div
+          role="status"
+          aria-label="Loading"
+          className="bg-background h-dvh w-full"
+        />
+      }
+    >
       <Toaster />
       <ThreadProvider>
         <StreamProvider>

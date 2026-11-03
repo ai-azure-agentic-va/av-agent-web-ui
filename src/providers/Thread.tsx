@@ -38,6 +38,9 @@ interface ThreadContextType {
   setThreads: Dispatch<SetStateAction<ConversationThread[]>>;
   threadsLoading: boolean;
   setThreadsLoading: Dispatch<SetStateAction<boolean>>;
+  // True when the last refresh could not reach the backend, so an empty list
+  // means "couldn't load", not "no conversations".
+  threadsError: boolean;
 }
 
 const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
@@ -63,33 +66,43 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   );
   const [threads, setThreads] = useState<ConversationThread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
+  const [threadsError, setThreadsError] = useState(false);
 
   // Hit the standard LangGraph contract (POST /threads/search) through the SDK
   // client, which routes via the Next.js /api proxy to the backend.
   const client = useMemo(() => new Client({ apiUrl }), [apiUrl]);
 
-  const getThreads = useCallback(async (): Promise<ConversationThread[]> => {
-    try {
-      const threads = await client.threads.search({
+  const searchThreads = useCallback(
+    async () =>
+      (await client.threads.search({
         limit: 100,
         sortBy: "updated_at",
         sortOrder: "desc",
-      });
-      return threads as ConversationThread[];
+      })) as ConversationThread[],
+    [client],
+  );
+
+  const getThreads = useCallback(async (): Promise<ConversationThread[]> => {
+    try {
+      return await searchThreads();
     } catch {
       // Backend not reachable / endpoint unavailable — non-fatal, render empty.
       return [];
     }
-  }, [client]);
+  }, [searchThreads]);
 
   const refreshThreads = useCallback(async () => {
     setThreadsLoading(true);
     try {
-      setThreads(await getThreads());
+      setThreads(await searchThreads());
+      setThreadsError(false);
+    } catch {
+      // Keep whatever list is already showing; the history surfaces the error.
+      setThreadsError(true);
     } finally {
       setThreadsLoading(false);
     }
-  }, [getThreads]);
+  }, [searchThreads]);
 
   const value = {
     getThreads,
@@ -98,6 +111,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     setThreads,
     threadsLoading,
     setThreadsLoading,
+    threadsError,
   };
 
   return (

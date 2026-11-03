@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Interrupt } from "@langchain/langgraph-sdk";
 import { cn } from "@/lib/utils";
+import { Card } from "@/components/ui/card";
 import { useStreamContext } from "@/providers/Stream";
 import { HITLRequest } from "./types";
 import { StateView } from "./components/state-view";
@@ -57,7 +58,11 @@ export function ThreadView({ interrupt }: ThreadViewProps) {
   }
 
   return (
-    <div className="flex h-full w-full flex-col rounded-2xl bg-gray-50 p-8 lg:flex-row">
+    // Black outline: the agent is waiting on the person.
+    <Card
+      tone="attention"
+      className="flex w-full flex-col"
+    >
       {showSidePanel ? (
         <StateView
           handleShowSidePanel={handleShowSidePanel}
@@ -66,39 +71,39 @@ export function ThreadView({ interrupt }: ThreadViewProps) {
           view={showState ? "state" : "description"}
         />
       ) : (
-        <div className="flex w-full flex-col gap-6">
-          {interrupts.length > 1 && (
-            <div className="flex flex-wrap items-center gap-2">
-              {interrupts.map((it, idx) => {
-                const title =
-                  it.value?.action_requests?.[0]?.name ??
-                  `Interrupt ${idx + 1}`;
-                return (
-                  <button
-                    key={it.id ?? idx}
-                    type="button"
-                    onClick={() => setActiveInterruptIndex(idx)}
-                    className={cn(
-                      "rounded-full border px-3 py-1 text-sm transition-colors",
-                      idx === activeInterruptIndex
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "hover:border-primary hover:text-primary border-gray-300 bg-white text-gray-600",
-                    )}
-                  >
-                    {title}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          <ThreadActionsView
-            interrupt={activeInterrupt}
-            handleShowSidePanel={handleShowSidePanel}
-            showState={showState}
-            showDescription={showDescription}
-          />
-        </div>
+        <ThreadActionsView
+          interrupt={activeInterrupt}
+          handleShowSidePanel={handleShowSidePanel}
+          showState={showState}
+          showDescription={showDescription}
+          switcher={
+            interrupts.length > 1 && (
+              <div className="flex flex-wrap items-center gap-2">
+                {interrupts.map((it, idx) => {
+                  const title =
+                    it.value?.action_requests?.[0]?.name ??
+                    `Interrupt ${idx + 1}`;
+                  return (
+                    <button
+                      key={it.id ?? idx}
+                      type="button"
+                      onClick={() => setActiveInterruptIndex(idx)}
+                      className={cn(
+                        "focus-visible:ring-ring rounded-full border px-3 py-1 text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+                        idx === activeInterruptIndex
+                          ? "border-foreground bg-foreground text-background"
+                          : "hover:border-foreground border-border bg-background text-foreground",
+                      )}
+                    >
+                      {title}
+                    </button>
+                  );
+                })}
+              </div>
+            )
+          }
+        />
       )}
-    </div>
+    </Card>
   );
 }

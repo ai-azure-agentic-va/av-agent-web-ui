@@ -72,18 +72,35 @@ export function baseMessageObject(item: unknown): string {
   }
 }
 
+// A date, or an ISO 8601 date string. `new Date()` alone reads
+// "VPN Client 6.2" as June 2001 and any number as epoch milliseconds.
+const ISO_DATE =
+  /^(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+
 export function unknownToPrettyDate(input: unknown): string | undefined {
-  try {
-    if (
-      Object.prototype.toString.call(input) === "[object Date]" ||
-      new Date(input as string)
-    ) {
-      return format(new Date(input as string), "MM/dd/yyyy hh:mm a");
-    }
-  } catch {
-    // failed to parse date. no-op
+  if (input instanceof Date) {
+    return Number.isNaN(input.getTime())
+      ? undefined
+      : format(input, "MM/dd/yyyy hh:mm a");
   }
-  return undefined;
+  if (typeof input !== "string") return undefined;
+  const value = input.trim();
+  const match = ISO_DATE.exec(value);
+  if (!match) return undefined;
+
+  // A bare date is a calendar day, not UTC midnight (which shows as the day
+  // before, at 8 PM, west of Greenwich).
+  if (value.length === 10) {
+    const [y, m, d] = [Number(match[1]), Number(match[2]), Number(match[3])];
+    const day = new Date(y, m - 1, d);
+    return day.getMonth() === m - 1 && day.getDate() === d
+      ? format(day, "MM/dd/yyyy")
+      : undefined;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? undefined
+    : format(date, "MM/dd/yyyy hh:mm a");
 }
 
 export function createDefaultHumanResponse(

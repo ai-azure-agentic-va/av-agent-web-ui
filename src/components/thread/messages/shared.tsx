@@ -11,6 +11,7 @@ import {
 import { TooltipIconButton } from "../tooltip-icon-button";
 import { AnimatePresence, motion } from "framer-motion";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
 function ContentCopyable({
@@ -24,16 +25,21 @@ function ContentCopyable({
 
   const handleCopy = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    // Confirm only once the write lands; clipboard access can be denied.
+    navigator.clipboard.writeText(content).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      },
+      () => toast.error("Couldn't copy to the clipboard."),
+    );
   };
 
   return (
     <TooltipIconButton
       onClick={(e) => handleCopy(e)}
       variant="ghost"
-      tooltip="Copy content"
+      tooltip={copied ? "Copied" : "Copy"}
       disabled={disabled}
     >
       <AnimatePresence
@@ -48,7 +54,7 @@ function ContentCopyable({
             exit={{ opacity: 0, scale: 0.8 }}
             transition={{ duration: 0.15 }}
           >
-            <CopyCheck className="text-green-500" />
+            <CopyCheck className="text-success" />
           </motion.div>
         ) : (
           <motion.div
@@ -81,33 +87,37 @@ export function BranchSwitcher({
   const index = branchOptions.indexOf(branch);
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1">
       <Button
         variant="ghost"
         size="icon"
-        className="size-6 p-1"
+        className="size-8 p-1.5"
+        aria-label="Previous version"
+        title="Previous version"
         onClick={() => {
           const prevBranch = branchOptions[index - 1];
           if (!prevBranch) return;
           onSelect(prevBranch);
         }}
-        disabled={isLoading}
+        disabled={isLoading || index <= 0}
       >
         <ChevronLeft />
       </Button>
-      <span className="text-sm">
+      <span className="text-muted-foreground text-xs">
         {index + 1} / {branchOptions.length}
       </span>
       <Button
         variant="ghost"
         size="icon"
-        className="size-6 p-1"
+        className="size-8 p-1.5"
+        aria-label="Next version"
+        title="Next version"
         onClick={() => {
           const nextBranch = branchOptions[index + 1];
           if (!nextBranch) return;
           onSelect(nextBranch);
         }}
-        disabled={isLoading}
+        disabled={isLoading || index >= branchOptions.length - 1}
       >
         <ChevronRight />
       </Button>
@@ -165,7 +175,7 @@ export function CommandBar({
 
   if (isHumanMessage && isEditing && !!setIsEditing && !!handleSubmitEdit) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1">
         <TooltipIconButton
           disabled={isLoading}
           tooltip="Cancel edit"
@@ -189,7 +199,7 @@ export function CommandBar({
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1">
       <ContentCopyable
         content={content}
         disabled={isLoading}
@@ -197,7 +207,7 @@ export function CommandBar({
       {isAiMessage && !!handleRegenerate && (
         <TooltipIconButton
           disabled={isLoading}
-          tooltip="Refresh"
+          tooltip="Regenerate"
           variant="ghost"
           onClick={handleRegenerate}
         >

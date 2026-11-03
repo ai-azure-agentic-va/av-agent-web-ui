@@ -30,5 +30,5 @@
     "src/hooks/use-threads",
     "src/app/thread/[threadId]"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "agent-chat-package"]
 }

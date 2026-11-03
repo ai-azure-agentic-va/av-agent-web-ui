@@ -256,7 +256,8 @@ feature/* → develop → stage → main
 - **main** — the versioned, release-ready source.
 
 Every change lands via a pull request with a Conventional-Commit title and a
-filled-in description. Run `pnpm build` locally before opening a PR.
+filled-in description. Run `pnpm test` (Vitest unit tests) and `pnpm build`
+locally before opening a PR.
 
 ## Releases
 

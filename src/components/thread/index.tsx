@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useId,
   useRef,
   useState,
 } from "react";
@@ -19,7 +20,6 @@ import {
   extractFollowUps,
   normalizeFollowUpForSubmit,
 } from "./utils";
-import { ACTIVITY_LABELS } from "@/lib/activity-labels";
 import { Button } from "../ui/button";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
@@ -29,25 +29,29 @@ import {
   ensureToolCallsHaveResponses,
 } from "@/lib/ensure-tool-responses";
 import { AppLogo } from "../icons/app-logo";
-import { APP_NAME } from "@/lib/app-config";
+import { APP_NAME, APP_TAGLINE } from "@/lib/app-config";
 import {
   ArrowDown,
+  ArrowRight,
   ArrowUp,
   PanelLeftClose,
   PanelLeft,
   SquarePen,
   XIcon,
-  LogOut,
+  Paperclip,
 } from "lucide-react";
+import { MultimodalPreview } from "./MultimodalPreview";
+import { HeaderAccount } from "./header-account";
+import { useFileUpload, type FileUpload } from "@/hooks/useFileUpload";
+import { SUPPORTED_FILE_TYPES } from "@/lib/multimodal-utils";
 import { SessionBoundaryNudge } from "./session-nudge";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import ThreadHistory from "./history";
 import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { Label } from "../ui/label";
-import { Switch } from "../ui/switch";
 import { Skeleton } from "../ui/skeleton";
+import { cardVariants } from "../ui/card";
 import {
   Tooltip,
   TooltipContent,
@@ -55,10 +59,16 @@ import {
   TooltipTrigger,
 } from "../ui/tooltip";
 import { useArtifactOpen, ArtifactContent, ArtifactTitle } from "./artifact";
+import { LiveClockContext, TURN_GUTTER } from "./turn-chain";
+import {
+  PromptLibraryButton,
+  PromptLibraryCard,
+  PromptLibraryLink,
+  STARTER_TILE_COUNT,
+  type StarterPrompt,
+} from "./prompt-library";
 
 const ssoEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH !== "true";
-
-type StarterPrompt = { label?: string; message: string };
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -92,8 +102,10 @@ function ScrollToBottom(props: { className?: string }) {
     <Button
       variant="secondary"
       size="icon"
+      aria-label="Scroll to latest message"
+      title="Scroll to latest message"
       className={cn(
-        "border-border h-10 w-10 rounded-full border shadow-lg",
+        "border-foreground bg-background hover:bg-foreground hover:text-background h-10 w-10 rounded-full border shadow-[0_4px_12px_rgb(0_0_0/0.12)]",
         props.className,
       )}
       onClick={() => scrollToBottom()}
@@ -109,11 +121,14 @@ type ChatInputProps = {
   handleSubmit: (e: FormEvent) => void;
   isLoading: boolean;
   stream: { isLoading: boolean; stop: () => void };
-  hideToolCalls: boolean | null;
-  setHideToolCalls: (v: boolean) => void;
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
   placeholder?: string;
   onStop?: () => void;
+  upload: FileUpload;
+  prompts: StarterPrompt[];
+  libraryOpen: boolean;
+  onLibraryOpenChange: (open: boolean) => void;
+  onPickPrompt: (message: string) => void;
 };
 
 function ChatInput({
@@ -121,114 +136,168 @@ function ChatInput({
   setInput,
   handleSubmit,
   stream,
-  hideToolCalls,
-  setHideToolCalls,
   textareaRef,
   placeholder = `Message ${APP_NAME}...`,
   onStop,
+  upload,
+  prompts,
+  libraryOpen,
+  onLibraryOpenChange,
+  onPickPrompt,
 }: ChatInputProps) {
   const clientConfig = useClientConfig();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  const libraryId = useId();
+  const hasPrompts = prompts.length > 0;
+  const showFooter = clientConfig.enableFileUpload || hasPrompts;
   return (
-    <div className="border-border bg-card relative rounded-2xl border shadow-sm">
-      <form
-        onSubmit={handleSubmit}
-        className="flex flex-col"
+    // The library card is the composer's sibling, not its child, so focus in
+    // the card doesn't light the composer's halo and the form never sees it.
+    <div className="relative">
+      {hasPrompts && (
+        <PromptLibraryCard
+          id={libraryId}
+          open={libraryOpen}
+          onOpenChange={onLibraryOpenChange}
+          prompts={prompts}
+          onPick={onPickPrompt}
+          anchorRef={composerRef}
+        />
+      )}
+      <div
+        ref={composerRef}
+        className={cn(
+          "border-foreground bg-background corner-step relative border transition-[border-color,box-shadow]",
+          // The textarea drops its own outline, so the whole composer carries focus.
+          "focus-within:ring-signal/20 focus-within:ring-4",
+          upload.dragOver && "border-signal ring-signal/20 ring-4",
+        )}
+        onDragOver={upload.handleDragOver}
+        onDragLeave={upload.handleDragLeave}
+        onDrop={upload.handleDrop}
       >
-        <div className="flex items-end gap-2 p-3">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                !e.shiftKey &&
-                !e.metaKey &&
-                !e.nativeEvent.isComposing
-              ) {
-                e.preventDefault();
-                const el = e.target as HTMLElement | undefined;
-                const form = el?.closest("form");
-                form?.requestSubmit();
-              }
-            }}
-            placeholder={placeholder}
-            rows={1}
-            className="placeholder:text-muted-foreground/50 field-sizing-content max-h-[200px] min-h-[44px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm focus:ring-0 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-          />
-          <div className="flex items-center gap-1 pb-1">
-            {stream.isLoading ? (
-              <button
-                type="button"
-                onClick={() => {
-                  stream.stop();
-                  onStop?.();
-                }}
-                aria-label="Stop generating"
-                title="Stop generating"
-                className={cn(
-                  "group relative flex h-9 w-9 items-center justify-center rounded-lg",
-                  "bg-[#E6EDF5] transition-colors",
-                  "hover:bg-[#0F3D70]",
-                )}
-              >
-                <span
-                  aria-hidden="true"
-                  className="flex h-4 items-center gap-[2.5px] transition-opacity group-hover:opacity-0"
-                >
-                  <span className="wave-bar" />
-                  <span className="wave-bar" />
-                  <span className="wave-bar" />
-                  <span className="wave-bar" />
-                </span>
-                <span
-                  aria-hidden="true"
+        <form
+          onSubmit={handleSubmit}
+          className="flex flex-col"
+        >
+          {upload.contentBlocks.length > 0 && (
+            <div className="flex flex-wrap items-start gap-2 px-3 pt-3">
+              {upload.contentBlocks.map((block, idx) => (
+                <MultimodalPreview
+                  key={idx}
+                  block={block}
+                  size="md"
+                  removable
+                  onRemove={() => upload.removeBlock(idx)}
+                />
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2 p-3">
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onPaste={upload.handlePaste}
+              onKeyDown={(e) => {
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !e.metaKey &&
+                  !e.nativeEvent.isComposing
+                ) {
+                  e.preventDefault();
+                  const el = e.target as HTMLElement | undefined;
+                  const form = el?.closest("form");
+                  form?.requestSubmit();
+                }
+              }}
+              placeholder={placeholder}
+              aria-label="Message"
+              rows={1}
+              // 16px below sm: iOS Safari zooms the page into any smaller field.
+              className="placeholder:text-muted-foreground field-sizing-content max-h-[200px] min-h-[44px] flex-1 resize-none scrollbar-thin border-0 bg-transparent px-2 py-2.5 text-base leading-6 focus:ring-0 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            />
+            <div className="flex items-center gap-1 pb-0.5">
+              {stream.isLoading ? (
+                // The live strap already says the agent is working; this is just
+                // the way to stop it.
+                <button
+                  type="button"
+                  onClick={() => {
+                    stream.stop();
+                    onStop?.();
+                  }}
+                  aria-label="Stop generating"
+                  title="Stop generating"
                   className={cn(
-                    "absolute inset-0 flex items-center justify-center",
-                    "opacity-0 transition-opacity group-hover:opacity-100",
+                    "flex h-10 w-10 items-center justify-center rounded-md",
+                    "bg-primary transition-colors outline-none",
+                    "hover:bg-signal focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2",
                   )}
                 >
-                  <span className="h-2.5 w-2.5 rounded-[2px] bg-white" />
-                </span>
-              </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={!input.trim()}
-                aria-label="Send message"
-                className={cn(
-                  "flex h-9 w-9 items-center justify-center rounded-lg",
-                  "bg-[#0F3D70] text-white transition-colors",
-                  "hover:bg-[#0F3D70]/90",
-                  "disabled:cursor-not-allowed disabled:opacity-50",
-                )}
-              >
-                <ArrowUp className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-        </div>
-        {/* When tool calls are force-hidden via HIDE_TOOL_CALLS, this toggle
-            is moot — omit it (and its footer row) from the UI. */}
-        {!clientConfig.hideToolCalls && (
-          <div className="border-border flex items-center justify-between border-t px-4 py-2">
-            <div className="flex items-center gap-2">
-              <Switch
-                id="render-tool-calls"
-                checked={hideToolCalls ?? false}
-                onCheckedChange={setHideToolCalls}
-                className="scale-90"
-              />
-              <Label
-                htmlFor="render-tool-calls"
-                className="text-muted-foreground text-xs"
-              >
-                Hide tool calls
-              </Label>
+                  <span
+                    aria-hidden="true"
+                    className="bg-primary-foreground size-3 rounded-[2px]"
+                  />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!input.trim() && upload.contentBlocks.length === 0}
+                  aria-label="Send message"
+                  title="Send message"
+                  className={cn(
+                    "flex h-10 w-10 items-center justify-center rounded-md",
+                    "bg-signal text-signal-foreground transition-colors outline-none",
+                    "hover:bg-signal-ink",
+                    "focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2",
+                    "disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed",
+                  )}
+                >
+                  <ArrowUp className="h-5 w-5" />
+                </button>
+              )}
             </div>
           </div>
-        )}
-      </form>
+          {showFooter && (
+            <div className="border-border flex min-h-11 items-center justify-between gap-2 border-t px-2 py-1.5">
+              <div className="flex items-center gap-0.5">
+                {/* Gated by ENABLE_FILE_UPLOAD; paste / drop are gated in the hook. */}
+                {clientConfig.enableFileUpload && (
+                  <>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept={SUPPORTED_FILE_TYPES.join(",")}
+                      multiple
+                      hidden
+                      onChange={upload.handleFileInput}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      aria-label="Attach files"
+                      title="Attach images or PDFs"
+                      className="text-foreground hover:bg-accent focus-visible:ring-ring flex h-8 w-8 items-center justify-center rounded-md transition-colors outline-none focus-visible:ring-2"
+                    >
+                      <Paperclip className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
+                {hasPrompts && (
+                  <PromptLibraryButton
+                    open={libraryOpen}
+                    onOpenChange={onLibraryOpenChange}
+                    controlsId={libraryId}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+        </form>
+      </div>
     </div>
   );
 }
@@ -269,18 +338,23 @@ const AssistantTurn = memo(function AssistantTurn({
         handleRegenerate={handleRegenerate}
       />
       {followUps.length > 0 && (
-        <div className="flex flex-col gap-2 pb-2">
-          <p className="text-muted-foreground text-xs font-medium">
+        <div className={cn("flex flex-col gap-3 pb-2", TURN_GUTTER)}>
+          <p className="text-muted-foreground text-[13px] font-medium">
             Want to explore further?
           </p>
           <div className="flex flex-wrap gap-2">
             {followUps.map((q, i) => (
               <button
                 key={i}
+                type="button"
                 onClick={() => onFollowUpClick(q)}
-                className="border-border bg-card text-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary rounded-full border px-3 py-1.5 text-xs transition-colors"
+                className="group/fu border-foreground hover:bg-foreground hover:text-background focus-visible:ring-ring inline-flex items-center gap-2 rounded-full border px-4 py-2 text-left text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
               >
                 {q}
+                <ArrowRight
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0 transition-transform group-hover/fu:translate-x-0.5"
+                />
               </button>
             ))}
           </div>
@@ -299,10 +373,6 @@ export function Thread() {
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
   );
-  const [hideToolCalls, setHideToolCalls] = useQueryState(
-    "hideToolCalls",
-    parseAsBoolean.withDefault(false),
-  );
   const [debugOpen, setDebugOpen] = useQueryState(
     "debugPanel",
     parseAsBoolean.withDefault(false),
@@ -312,6 +382,7 @@ export function Thread() {
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const [starterPrompts, setStarterPrompts] = useState<StarterPrompt[]>([]);
   const [starterPromptsLoading, setStarterPromptsLoading] = useState(true);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
 
   const stream = useStreamContext();
@@ -327,8 +398,25 @@ export function Thread() {
   streamRef.current = stream;
   const inputRef = useRef(input);
   inputRef.current = input;
+  const clientConfig = useClientConfig();
+  const upload = useFileUpload({ enabled: clientConfig.enableFileUpload });
+  const { resetBlocks } = upload;
+  const contentBlocksRef = useRef(upload.contentBlocks);
+  contentBlocksRef.current = upload.contentBlocks;
 
   const lastError = useRef<string | undefined>(undefined);
+
+  // When the current turn started, shared with the live chain in the thread so
+  // its clocks don't restart when the first AI message arrives. `seen` is
+  // fresh per turn: it remembers which steps have already risen in.
+  const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
+  useEffect(() => {
+    setTurnStartedAt(isLoading ? Date.now() : null);
+  }, [isLoading]);
+  const turnClock = useMemo(
+    () => ({ startedAt: turnStartedAt, seen: new Set<string>() }),
+    [turnStartedAt],
+  );
 
   const setThreadId = (id: string | null) => {
     _setThreadId(id);
@@ -378,12 +466,20 @@ export function Thread() {
       e?.preventDefault();
       const stream = streamRef.current;
       const text = (overrideText ?? inputRef.current).trim();
-      if (text.length === 0 || stream.isLoading) return;
+      // Staged attachments go out with a typed message only; a follow-up chip
+      // click leaves them in the composer for the user's own next message.
+      const attachments =
+        overrideText === undefined ? contentBlocksRef.current : [];
+      if ((text.length === 0 && attachments.length === 0) || stream.isLoading)
+        return;
 
       const newHumanMessage: Message = {
         id: uuidv4(),
         type: "human",
-        content: [{ type: "text", text }] as Message["content"],
+        content: [
+          ...(text ? [{ type: "text", text }] : []),
+          ...attachments,
+        ] as Message["content"],
       };
 
       const toolMessages = ensureToolCallsHaveResponses(stream.messages);
@@ -407,11 +503,15 @@ export function Thread() {
         },
       );
 
+      setLibraryOpen(false);
       // Only clear the composer for a typed message; a follow-up chip click
       // (overrideText) leaves any half-typed input untouched.
-      if (overrideText === undefined) setInput("");
+      if (overrideText === undefined) {
+        setInput("");
+        resetBlocks();
+      }
     },
-    [],
+    [resetBlocks],
   );
 
   const handleStarterPrompt = useCallback((message: string) => {
@@ -431,6 +531,21 @@ export function Thread() {
         }),
       },
     );
+  }, []);
+
+  // A prompt picked from the library replaces the draft and waits in the
+  // composer, caret at the end, for the person to edit it and press Enter.
+  // (The welcome screen's Starter tiles send straight away instead.)
+  const handlePickPrompt = useCallback((message: string) => {
+    setInput(message);
+    setLibraryOpen(false);
+    requestAnimationFrame(() => {
+      const el = chatInputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+      el.scrollTop = el.scrollHeight;
+    });
   }, []);
 
   // Clicking a follow-up suggestion sends it immediately as a new turn,
@@ -460,384 +575,450 @@ export function Thread() {
   const hasNoAIOrToolMessages = stream.hasNoAIOrToolMessages;
 
   return (
-    <div className="bg-background flex h-screen w-full overflow-hidden">
-      {/* Sidebar */}
-      <div className="relative hidden lg:flex">
-        <motion.div
-          className="border-border bg-sidebar absolute z-20 h-full overflow-hidden border-r"
-          style={{ width: 280 }}
-          animate={
-            isLargeScreen
-              ? { x: chatHistoryOpen ? 0 : -280 }
-              : { x: chatHistoryOpen ? 0 : -280 }
-          }
-          initial={{ x: -280 }}
-          transition={
-            isLargeScreen
-              ? { type: "spring", stiffness: 300, damping: 30 }
-              : { duration: 0 }
-          }
-        >
-          <div
-            className="relative h-full"
+    <LiveClockContext.Provider value={turnClock}>
+      <div className="bg-background flex h-dvh w-full overflow-hidden">
+        {/* Sidebar */}
+        <div className="relative hidden lg:flex">
+          <motion.div
+            className="border-border bg-sidebar absolute z-20 h-full overflow-hidden border-r"
             style={{ width: 280 }}
+            // Closed, it is only translated off-screen: keep it out of the tab
+            // order and the accessibility tree until it slides back in.
+            inert={!chatHistoryOpen}
+            animate={
+              isLargeScreen
+                ? { x: chatHistoryOpen ? 0 : -280 }
+                : { x: chatHistoryOpen ? 0 : -280 }
+            }
+            initial={{ x: -280 }}
+            transition={
+              isLargeScreen
+                ? { type: "spring", stiffness: 300, damping: 30 }
+                : { duration: 0 }
+            }
           >
-            <ThreadHistory />
-          </div>
-        </motion.div>
-      </div>
-
-      {/* Main Content */}
-      <div
-        className={cn(
-          "grid w-full grid-cols-[1fr_0fr] transition-all duration-500",
-          artifactOpen && "grid-cols-[3fr_2fr]",
-        )}
-      >
-        <motion.div
-          className={cn(
-            "relative flex min-w-0 flex-1 flex-col overflow-hidden",
-            !chatStarted && "grid-rows-[1fr]",
-          )}
-          layout={isLargeScreen}
-          animate={{
-            marginLeft: chatHistoryOpen ? (isLargeScreen ? 280 : 0) : 0,
-            width: chatHistoryOpen
-              ? isLargeScreen
-                ? "calc(100% - 280px)"
-                : "100%"
-              : "100%",
-          }}
-          transition={
-            isLargeScreen
-              ? { type: "spring", stiffness: 300, damping: 30 }
-              : { duration: 0 }
-          }
-        >
-          {/* Header */}
-          <header className="border-border bg-background/80 sticky top-0 z-10 flex h-14 items-center justify-between border-b px-4 backdrop-blur-sm">
-            <div className="flex items-center gap-3">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9"
-                      onClick={() => setChatHistoryOpen((p) => !p)}
-                    >
-                      {chatHistoryOpen ? (
-                        <PanelLeftClose className="h-4 w-4" />
-                      ) : (
-                        <PanelLeft className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    <p>{chatHistoryOpen ? "Close sidebar" : "Open sidebar"}</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9"
-                onClick={() => setThreadId(null)}
-                title="New chat"
-              >
-                <SquarePen className="h-4 w-4" />
-              </Button>
-
-              <button
-                className="flex cursor-pointer items-center gap-2.5"
-                onClick={() => setThreadId(null)}
-              >
-                <AppLogo
-                  width={28}
-                  height={28}
-                />
-                <span className="text-foreground text-lg font-semibold tracking-tight">
-                  {APP_NAME}
-                </span>
-              </button>
+            <div
+              className="relative h-full"
+              style={{ width: 280 }}
+            >
+              <ThreadHistory />
             </div>
+          </motion.div>
+        </div>
 
-            <div className="flex items-center gap-2">
-              {ssoEnabled && (
+        {/* Main Content */}
+        <div
+          className={cn(
+            "grid w-full grid-cols-[1fr_0fr] transition-all duration-500",
+            artifactOpen && "grid-cols-[3fr_2fr]",
+          )}
+        >
+          <motion.div
+            className={cn(
+              "relative flex min-w-0 flex-1 flex-col overflow-hidden",
+              !chatStarted && "grid-rows-[1fr]",
+            )}
+            layout={isLargeScreen}
+            animate={{
+              marginLeft: chatHistoryOpen ? (isLargeScreen ? 280 : 0) : 0,
+              width: chatHistoryOpen
+                ? isLargeScreen
+                  ? "calc(100% - 280px)"
+                  : "100%"
+                : "100%",
+            }}
+            transition={
+              isLargeScreen
+                ? { type: "spring", stiffness: 300, damping: 30 }
+                : { duration: 0 }
+            }
+          >
+            {/* Header */}
+            <header className="border-border bg-background sticky top-0 z-10 flex h-15 items-center justify-between gap-3 border-b px-3 sm:px-5">
+              <div className="flex min-w-0 items-center gap-1 sm:gap-2">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-10 w-10"
+                        aria-label={
+                          chatHistoryOpen
+                            ? "Close conversation history"
+                            : "Open conversation history"
+                        }
+                        aria-expanded={!!chatHistoryOpen}
+                        onClick={() => setChatHistoryOpen((p) => !p)}
+                      >
+                        {chatHistoryOpen ? (
+                          <PanelLeftClose className="h-4 w-4" />
+                        ) : (
+                          <PanelLeft className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                      <p>
+                        {chatHistoryOpen ? "Close sidebar" : "Open sidebar"}
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+
                 <Button
                   variant="ghost"
-                  className="text-muted-foreground hover:text-destructive h-9 gap-2 px-3 text-sm"
-                  onClick={() => {
-                    window.location.href = "/api/auth/logout";
-                  }}
+                  size="icon"
+                  className="h-10 w-10"
+                  onClick={() => setThreadId(null)}
+                  aria-label="New conversation"
+                  title="New conversation"
                 >
-                  <LogOut className="h-4 w-4" />
-                  Log out
+                  <SquarePen className="h-4 w-4" />
                 </Button>
-              )}
-            </div>
-          </header>
 
-          {/* Chat Area */}
-          <StickToBottom className="relative flex-1 overflow-hidden">
-            <StickyToBottomContent
-              className={cn(
-                "absolute inset-0 scrollbar-thin overflow-y-auto px-4",
-                !chatStarted && "flex flex-col items-center justify-center",
-                chatStarted && "grid grid-rows-[1fr_auto]",
-              )}
-              contentClassName={cn(
-                "w-full max-w-3xl mx-auto flex flex-col gap-6",
-                chatStarted && "pt-8 pb-32",
-              )}
-              content={
-                <>
-                  {!chatStarted && (
-                    <div className="flex w-full flex-col items-center gap-6 text-center">
-                      <AppLogo
-                        width={48}
-                        height={48}
-                      />
-                      <div>
-                        <h1 className="text-foreground text-2xl font-semibold tracking-tight">
-                          {APP_NAME}
-                        </h1>
-                      </div>
+                <button
+                  type="button"
+                  className="focus-visible:ring-ring ml-1.5 flex min-w-0 cursor-pointer items-center gap-2.5 rounded-md outline-none focus-visible:ring-2"
+                  onClick={() => setThreadId(null)}
+                >
+                  <AppLogo
+                    width={28}
+                    height={28}
+                  />
+                  <span className="text-foreground truncate text-[19px] font-semibold tracking-[-0.01em]">
+                    {APP_NAME}
+                  </span>
+                </button>
+              </div>
 
-                      {/* Search Box */}
-                      <div className="w-full max-w-2xl text-left">
-                        <ChatInput
-                          input={input}
-                          setInput={setInput}
-                          handleSubmit={handleSubmit}
-                          isLoading={isLoading}
-                          stream={stream}
-                          hideToolCalls={hideToolCalls}
-                          setHideToolCalls={setHideToolCalls}
-                          textareaRef={chatInputRef}
-                          placeholder="How can I support you today?"
-                        />
-                      </div>
+              <HeaderAccount ssoEnabled={ssoEnabled} />
+            </header>
 
-                      {/* Starter Prompts */}
-                      {starterPromptsLoading ? (
-                        <div className="grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
-                          {Array.from({ length: 4 }).map((_, i) => (
-                            <div
-                              key={i}
-                              className="border-border bg-card rounded-xl border px-4 py-3.5 shadow-sm"
-                            >
-                              <Skeleton className="h-4 w-2/3" />
-                              <Skeleton className="mt-2 h-3 w-full" />
-                            </div>
-                          ))}
+            {/* Chat Area */}
+            <StickToBottom className="relative flex-1 overflow-hidden">
+              <StickyToBottomContent
+                className={cn(
+                  "absolute inset-0 scrollbar-thin overflow-y-auto px-4",
+                  // Centered with an auto margin rather than justify-center, which
+                  // would clip the top of the welcome screen on short viewports.
+                  !chatStarted && "flex flex-col items-center",
+                  chatStarted && "grid grid-rows-[1fr_auto]",
+                )}
+                contentClassName={cn(
+                  // min-w-0: as a grid item this column would otherwise grow to
+                  // its widest table or code line and push past a phone screen.
+                  "w-full min-w-0 max-w-[780px] mx-auto flex flex-col gap-6",
+                  !chatStarted && "my-auto py-8 sm:py-12",
+                  chatStarted && "pt-10 pb-24",
+                )}
+                content={
+                  <>
+                    {!chatStarted && (
+                      <div className="flex w-full flex-col gap-8">
+                        {/* The front page: the product's name as the headline and
+                          its promise beneath in small type, set flush left like
+                          the questions it invites. */}
+                        <div className="flex flex-col items-start gap-3">
+                          <AppLogo
+                            width={40}
+                            height={40}
+                          />
+                          <div className="flex flex-col gap-2">
+                            <h1 className="text-foreground max-w-[24ch] text-[32px] leading-[1.15] font-semibold tracking-[-0.025em] text-balance sm:text-[40px]">
+                              {APP_NAME}
+                            </h1>
+                            <p className="text-muted-foreground max-w-[52ch] text-[15px] leading-6 font-normal text-pretty">
+                              {APP_TAGLINE}
+                            </p>
+                          </div>
                         </div>
-                      ) : (
-                        starterPrompts.length > 0 && (
-                          <div className="grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
-                            {starterPrompts.map((prompt, i) => (
-                              <button
+
+                        {/* Search Box */}
+                        <div className="w-full">
+                          <ChatInput
+                            input={input}
+                            setInput={setInput}
+                            handleSubmit={handleSubmit}
+                            isLoading={isLoading}
+                            stream={stream}
+                            textareaRef={chatInputRef}
+                            placeholder="Ask about an incident, a ticket or a runbook"
+                            upload={upload}
+                            prompts={starterPrompts}
+                            libraryOpen={libraryOpen}
+                            onLibraryOpenChange={setLibraryOpen}
+                            onPickPrompt={handlePickPrompt}
+                          />
+                        </div>
+
+                        {/* Starter Prompts */}
+                        {starterPromptsLoading ? (
+                          <div
+                            className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2"
+                            role="status"
+                            aria-label="Loading suggestions"
+                          >
+                            {Array.from({ length: 4 }).map((_, i) => (
+                              <div
                                 key={i}
-                                onClick={() =>
-                                  handleStarterPrompt(prompt.message)
-                                }
-                                disabled={isLoading}
-                                className="border-border bg-card hover:border-primary/40 hover:bg-accent rounded-xl border px-4 py-3.5 text-left shadow-sm transition-all hover:shadow-md disabled:opacity-50"
+                                className={cn(cardVariants(), "p-4")}
                               >
-                                <p className="text-foreground text-sm font-semibold">
-                                  {prompt.label || prompt.message}
-                                </p>
-                                {prompt.label && (
-                                  <p className="text-muted-foreground mt-1 line-clamp-2 text-xs">
-                                    {prompt.message}
-                                  </p>
-                                )}
-                              </button>
+                                <Skeleton className="h-4 w-2/3" />
+                                <Skeleton className="mt-2.5 h-3 w-full" />
+                              </div>
                             ))}
                           </div>
+                        ) : (
+                          starterPrompts.length > 0 && (
+                            <div className="flex w-full flex-col gap-5">
+                              <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+                                {starterPrompts
+                                  .slice(0, STARTER_TILE_COUNT)
+                                  .map((prompt, i) => (
+                                    <button
+                                      key={i}
+                                      type="button"
+                                      onClick={() =>
+                                        handleStarterPrompt(prompt.message)
+                                      }
+                                      disabled={isLoading}
+                                      className={cn(
+                                        cardVariants({ interactive: true }),
+                                        "group/sp flex items-start justify-between gap-4 p-4 text-left disabled:pointer-events-none disabled:opacity-50",
+                                      )}
+                                    >
+                                      <span className="min-w-0">
+                                        <span className="text-foreground block text-[15px] font-medium">
+                                          {prompt.label || prompt.message}
+                                        </span>
+                                        {prompt.label && (
+                                          <span className="text-muted-foreground mt-1 line-clamp-2 block text-sm font-light">
+                                            {prompt.message}
+                                          </span>
+                                        )}
+                                      </span>
+                                      <ArrowRight
+                                        aria-hidden="true"
+                                        className="mt-0.5 size-4 shrink-0 transition-transform group-hover/sp:translate-x-0.5"
+                                      />
+                                    </button>
+                                  ))}
+                              </div>
+                              {starterPrompts.length > STARTER_TILE_COUNT && (
+                                <PromptLibraryLink
+                                  count={starterPrompts.length}
+                                  open={libraryOpen}
+                                  onOpenChange={setLibraryOpen}
+                                />
+                              )}
+                            </div>
+                          )
+                        )}
+                      </div>
+                    )}
+
+                    {chatStarted &&
+                      messages
+                        .filter(
+                          (m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX),
                         )
-                      )}
+                        .map((message, index, shown) =>
+                          message.type === "human" ? (
+                            <HumanMessage
+                              key={message.id || `${message.type}-${index}`}
+                              message={message}
+                              isLoading={isLoading}
+                              hasReply={
+                                index < shown.length - 1
+                                  ? shown[index + 1]?.type !== "human"
+                                  : isLoading
+                              }
+                            />
+                          ) : (
+                            <AssistantTurn
+                              key={message.id || `${message.type}-${index}`}
+                              message={message}
+                              isLoading={isLoading}
+                              isStreamingLast={
+                                isLoading && index === messages.length - 1
+                              }
+                              handleRegenerate={handleRegenerate}
+                              onFollowUpClick={handleFollowUpClick}
+                            />
+                          ),
+                        )}
+
+                    {hasNoAIOrToolMessages && !!stream.interrupt && (
+                      <AssistantMessage
+                        key="interrupt-msg"
+                        message={undefined}
+                        isLoading={isLoading}
+                        handleRegenerate={handleRegenerate}
+                      />
+                    )}
+
+                    {isLoading &&
+                      (() => {
+                        // Once the current turn has an AI message, the live
+                        // activity disclosure renders on top of it (inside
+                        // AssistantMessage), so no separate bottom indicator is
+                        // needed. Only before that first AI message appears do we
+                        // show the lightweight "starting" bubble here.
+                        let start = 0;
+                        for (let i = messages.length - 1; i >= 0; i -= 1) {
+                          if (messages[i]?.type === "human") {
+                            start = i + 1;
+                            break;
+                          }
+                        }
+                        const hasAiThisTurn = messages
+                          .slice(start)
+                          .some((m) => m.type === "ai");
+                        if (hasAiThisTurn) return null;
+
+                        return <AssistantMessageLoading />;
+                      })()}
+                  </>
+                }
+                footer={
+                  chatStarted && (
+                    // Sticky, not absolute: an absolute child of the scroller
+                    // would scroll away with the content it is meant to jump to.
+                    <div className="pointer-events-none sticky bottom-6 flex h-0 justify-end overflow-visible">
+                      <ScrollToBottom className="animate-in fade-in-0 zoom-in-95 pointer-events-auto -translate-y-full" />
+                    </div>
+                  )
+                }
+              />
+            </StickToBottom>
+
+            {/* Input Area */}
+            {chatStarted && (
+              // A short white fade lets the thread scroll under the composer
+              // instead of ending on a hard rule.
+              <div className="bg-background relative px-4 pt-2 pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-gradient-to-t before:from-white before:to-transparent">
+                <div className="mx-auto max-w-[780px]">
+                  <SessionBoundaryNudge
+                    messages={messages}
+                    threadId={threadId}
+                    onStartFresh={() => setThreadId(null)}
+                  />
+                  <ChatInput
+                    input={input}
+                    setInput={setInput}
+                    handleSubmit={handleSubmit}
+                    isLoading={isLoading}
+                    stream={stream}
+                    textareaRef={chatInputRef}
+                    placeholder="Ask about an incident, a ticket or a runbook"
+                    upload={upload}
+                    prompts={starterPrompts}
+                    libraryOpen={libraryOpen}
+                    onLibraryOpenChange={setLibraryOpen}
+                    onPickPrompt={handlePickPrompt}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Debug Panel */}
+            {debugOpen && (
+              <div className="border-border bg-muted border-t px-4 py-3 text-xs">
+                <div className="mx-auto max-w-[780px] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-foreground font-semibold">
+                      Debug Panel
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setDebugOpen(false)}
+                      aria-label="Close debug panel"
+                      className="text-muted-foreground hover:text-foreground focus-visible:ring-ring rounded-md p-1 outline-none focus-visible:ring-2"
+                    >
+                      <XIcon className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div>
+                      <p className="text-foreground font-medium">Thread ID</p>
+                      <p className="text-muted-foreground break-all">
+                        {threadId || "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-foreground font-medium">Messages</p>
+                      <p className="text-muted-foreground">
+                        {stream.messages.length} total (
+                        {
+                          stream.messages.filter((m) => m.type === "human")
+                            .length
+                        }{" "}
+                        human,{" "}
+                        {stream.messages.filter((m) => m.type === "ai").length}{" "}
+                        AI)
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-foreground font-medium">Status</p>
+                      <p className="text-muted-foreground">
+                        {isLoading
+                          ? `Loading${stream.thinkingStep ? ` — ${stream.thinkingStep}` : ""}`
+                          : "Idle"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-foreground font-medium">Follow-ups</p>
+                      <p className="text-muted-foreground">
+                        {stream.followUpQuestions.length} suggestions
+                      </p>
+                    </div>
+                  </div>
+
+                  {stream.lastDonePayload != null && (
+                    <div>
+                      <p className="text-foreground mb-1 font-medium">
+                        Last Response Payload
+                      </p>
+                      <pre className="border-border bg-background text-foreground max-h-48 scrollbar-thin overflow-auto rounded-[2px] border p-2.5 font-mono text-xs leading-5">
+                        {JSON.stringify(stream.lastDonePayload, null, 2)}
+                      </pre>
                     </div>
                   )}
-
-                  {chatStarted &&
-                    messages
-                      .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
-                      .map((message, index) =>
-                        message.type === "human" ? (
-                          <HumanMessage
-                            key={message.id || `${message.type}-${index}`}
-                            message={message}
-                            isLoading={isLoading}
-                          />
-                        ) : (
-                          <AssistantTurn
-                            key={message.id || `${message.type}-${index}`}
-                            message={message}
-                            isLoading={isLoading}
-                            isStreamingLast={
-                              isLoading && index === messages.length - 1
-                            }
-                            handleRegenerate={handleRegenerate}
-                            onFollowUpClick={handleFollowUpClick}
-                          />
-                        ),
-                      )}
-
-                  {hasNoAIOrToolMessages && !!stream.interrupt && (
-                    <AssistantMessage
-                      key="interrupt-msg"
-                      message={undefined}
-                      isLoading={isLoading}
-                      handleRegenerate={handleRegenerate}
-                    />
-                  )}
-
-                  {isLoading &&
-                    (() => {
-                      // Once the current turn has an AI message, the live
-                      // activity disclosure renders on top of it (inside
-                      // AssistantMessage), so no separate bottom indicator is
-                      // needed. Only before that first AI message appears do we
-                      // show the lightweight "starting" bubble here.
-                      let start = 0;
-                      for (let i = messages.length - 1; i >= 0; i -= 1) {
-                        if (messages[i]?.type === "human") {
-                          start = i + 1;
-                          break;
-                        }
-                      }
-                      const hasAiThisTurn = messages
-                        .slice(start)
-                        .some((m) => m.type === "ai");
-                      if (hasAiThisTurn) return null;
-
-                      return (
-                        <AssistantMessageLoading
-                          thinkingStep={
-                            stream.thinkingStep ||
-                            ACTIVITY_LABELS.gettingStarted
-                          }
-                        />
-                      );
-                    })()}
-                </>
-              }
-              footer={
-                chatStarted && (
-                  <div className="pointer-events-none absolute right-6 bottom-6">
-                    <ScrollToBottom className="animate-in fade-in-0 zoom-in-95 pointer-events-auto" />
-                  </div>
-                )
-              }
-            />
-          </StickToBottom>
-
-          {/* Input Area */}
-          {chatStarted && (
-            <div className="border-border bg-background border-t px-4 py-4">
-              <div className="mx-auto max-w-3xl">
-                <SessionBoundaryNudge
-                  messages={messages}
-                  threadId={threadId}
-                  onStartFresh={() => setThreadId(null)}
-                />
-                <ChatInput
-                  input={input}
-                  setInput={setInput}
-                  handleSubmit={handleSubmit}
-                  isLoading={isLoading}
-                  stream={stream}
-                  hideToolCalls={hideToolCalls}
-                  setHideToolCalls={setHideToolCalls}
-                  textareaRef={chatInputRef}
-                  placeholder="How can I support you today?"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Debug Panel */}
-          {debugOpen && (
-            <div className="border-border bg-muted/40 border-t px-4 py-3 text-xs">
-              <div className="mx-auto max-w-3xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-foreground font-semibold">Debug Panel</h3>
-                  <button
-                    onClick={() => setDebugOpen(false)}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <XIcon className="h-3.5 w-3.5" />
-                  </button>
                 </div>
-
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
-                  <div>
-                    <p className="text-foreground font-medium">Thread ID</p>
-                    <p className="text-muted-foreground font-mono break-all">
-                      {threadId || "—"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-foreground font-medium">Messages</p>
-                    <p className="text-muted-foreground">
-                      {stream.messages.length} total (
-                      {stream.messages.filter((m) => m.type === "human").length}{" "}
-                      human,{" "}
-                      {stream.messages.filter((m) => m.type === "ai").length}{" "}
-                      AI)
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-foreground font-medium">Status</p>
-                    <p className="text-muted-foreground">
-                      {isLoading
-                        ? `Loading${stream.thinkingStep ? ` — ${stream.thinkingStep}` : ""}`
-                        : "Idle"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-foreground font-medium">Follow-ups</p>
-                    <p className="text-muted-foreground">
-                      {stream.followUpQuestions.length} suggestions
-                    </p>
-                  </div>
-                </div>
-
-                {stream.lastDonePayload != null && (
-                  <div>
-                    <p className="text-foreground mb-1 font-medium">
-                      Last Response Payload
-                    </p>
-                    <pre className="border-border bg-background text-muted-foreground max-h-48 overflow-auto rounded border p-2 font-mono text-[10px]">
-                      {JSON.stringify(stream.lastDonePayload, null, 2)}
-                    </pre>
-                  </div>
-                )}
               </div>
-            </div>
-          )}
-        </motion.div>
+            )}
+          </motion.div>
 
-        {/* Artifact Panel */}
-        <div className="border-border bg-card relative flex flex-col border-l">
-          <div className="absolute inset-0 flex min-w-[30vw] flex-col">
-            <div className="border-border flex items-center justify-between border-b px-4 py-3">
-              <ArtifactTitle className="truncate text-sm font-medium" />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={closeArtifact}
-              >
-                <XIcon className="h-4 w-4" />
-              </Button>
+          {/* Artifact Panel. Its grid column collapses to zero when closed, so it
+            also leaves the tab order and drops its edge border. */}
+          <div
+            className={cn(
+              "border-border bg-card relative flex flex-col",
+              artifactOpen && "border-l",
+            )}
+            inert={!artifactOpen}
+          >
+            <div className="absolute inset-0 flex min-w-[30vw] flex-col">
+              <div className="border-border flex items-center justify-between border-b px-4 py-3">
+                <ArtifactTitle className="truncate text-sm font-medium" />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  aria-label="Close panel"
+                  title="Close panel"
+                  onClick={closeArtifact}
+                >
+                  <XIcon className="h-4 w-4" />
+                </Button>
+              </div>
+              <ArtifactContent className="relative flex-grow" />
             </div>
-            <ArtifactContent className="relative flex-grow" />
           </div>
         </div>
       </div>
-    </div>
+    </LiveClockContext.Provider>
   );
 }

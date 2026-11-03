@@ -1,31 +1,30 @@
-import { parsePartialJson } from "@langchain/core/output_parsers";
 import { useStreamContext, ThinkingStep } from "@/providers/Stream";
 import { useClientConfig } from "@/providers/ClientConfig";
-import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
+import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import {
   getContentString,
   stripFollowUpSection,
   linkifyCitations,
   hasInlineCitation,
+  citedIndices,
 } from "../utils";
 import { DocumentsAnalyzed } from "./documents-analyzed";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
 import { LoadExternalComponent } from "@langchain/langgraph-sdk/react-ui";
-import { cn } from "@/lib/utils";
-import { ToolCalls, ToolResult } from "./tool-calls";
-import { ContentBlock } from "@langchain/core/messages";
 import { Fragment } from "react/jsx-runtime";
 import { isAgentInboxInterruptSchema } from "@/lib/agent-inbox-interrupt";
 import { ThreadView } from "../agent-inbox";
-import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
-import { useDeferredValue, useMemo, useState } from "react";
-import { Bot, Check, ChevronRight } from "lucide-react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { MessageFeedback } from "@/components/thread/feedback";
 import { DebugSection } from "./debug-section";
 import { ACTIVITY_LABELS } from "@/lib/activity-labels";
+import { TurnChain, TURN_GUTTER } from "../turn-chain";
+import { AgentMark } from "../speaker";
+import { cn } from "@/lib/utils";
+import { APP_NAME } from "@/lib/app-config";
 
 function CustomComponent({
   message,
@@ -53,30 +52,6 @@ function CustomComponent({
       ))}
     </Fragment>
   );
-}
-
-function parseAnthropicStreamedToolCalls(
-  content: ContentBlock[],
-): AIMessage["tool_calls"] {
-  const toolCallContents = content.filter((c) => c.type === "tool_use" && c.id);
-
-  return toolCallContents.map((tc) => {
-    const toolCall = tc as Record<string, any>;
-    let json: Record<string, any> = {};
-    if (toolCall?.input) {
-      try {
-        json = parsePartialJson(toolCall.input) ?? {};
-      } catch {
-        // Pass
-      }
-    }
-    return {
-      name: toolCall.name ?? "",
-      id: toolCall.id ?? "",
-      args: json,
-      type: "tool_call",
-    };
-  });
 }
 
 interface InterruptProps {
@@ -129,15 +104,9 @@ export function AssistantMessage({
     () => stripFollowUpSection(getContentString(content)),
     [content],
   );
-  const [hideToolCallsToggle] = useQueryState(
-    "hideToolCalls",
-    parseAsBoolean.withDefault(false),
-  );
-  // Tool calls are an internal/debug surface. When HIDE_TOOL_CALLS is set
-  // (e.g. in production) they are force-hidden; otherwise the composer switch
-  // toggles them.
-  const clientConfig = useClientConfig();
-  const hideToolCalls = clientConfig.hideToolCalls || hideToolCallsToggle;
+  // Tool inputs and outputs are an internal/debug surface, shown inside the
+  // chain's steps. Controlled solely by the HIDE_TOOL_CALLS env var.
+  const { hideToolCalls } = useClientConfig();
 
   const thread = useStreamContext();
   const isLastMessage =
@@ -149,32 +118,23 @@ export function AssistantMessage({
   const threadInterrupt = thread.interrupt;
 
   const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
-  const anthropicStreamedToolCalls = useMemo(
-    () =>
-      Array.isArray(content)
-        ? parseAnthropicStreamedToolCalls(content)
-        : undefined,
-    [content],
-  );
 
   const hasToolCalls =
-    message &&
+    !!message &&
     "tool_calls" in message &&
-    message.tool_calls &&
+    !!message.tool_calls &&
     message.tool_calls.length > 0;
-  const toolCallsHaveContents =
-    hasToolCalls &&
-    message.tool_calls?.some(
-      (tc) => tc.args && Object.keys(tc.args).length > 0,
+  // During streaming an Anthropic tool call can live only in `tool_use`
+  // content blocks while `tool_calls` is still empty.
+  const hasAnthropicToolCalls =
+    Array.isArray(content) &&
+    content.some(
+      (c) =>
+        !!c &&
+        typeof c === "object" &&
+        (c as { type?: string }).type === "tool_use",
     );
-  const hasAnthropicToolCalls = !!anthropicStreamedToolCalls?.length;
   const isToolResult = message?.type === "tool";
-
-  // This answer's OWN retrieved set (undefined when the turn ran no search of its
-  // own). Used only to decide whether an otherwise-empty tool-call message is worth
-  // rendering (see the early return below); the visible panel uses the cumulative
-  // set instead.
-  const documents = message?.id ? thread.documentsMap?.[message.id] : undefined;
   // Cumulative referenced sources for THIS answer — and the set inline [n] markers
   // resolve against. The backend numbers documents append-only across the WHOLE
   // conversation, so an answer's own set is already the running list as of that
@@ -198,6 +158,11 @@ export function AssistantMessage({
     thread.isLoading &&
     message?.id === thread.liveHostAiId &&
     thread.thinkingSteps.length > 0;
+  // The host of the live chain is not animated in as a message: its chain's
+  // steps rise in themselves, and the host changes as each tool call lands.
+  // Decided once at mount so the class never toggles mid-life (which would
+  // replay the animation when the turn settles).
+  const [animateIn] = useState(() => !showLiveThought);
 
   // For every COMPLETED turn (this session or opened from history), the trace is
   // rebuilt from the turn's messages + their checkpoint timestamps — consistent
@@ -242,6 +207,16 @@ export function AssistantMessage({
     [contentString, citationDocuments],
   );
 
+  // The numbers this answer actually cites, in reading order: the credit strap
+  // leads with these rather than the whole running list.
+  const cited = useMemo(
+    () =>
+      showReferencedSources
+        ? citedIndices(contentString, citationDocuments)
+        : [],
+    [showReferencedSources, contentString, citationDocuments],
+  );
+
   // The run_id for feedback comes from the `done` SSE event payload,
   // stored on lastDonePayload by Stream.tsx
   const lastDonePayload = thread.lastDonePayload as Record<
@@ -253,24 +228,22 @@ export function AssistantMessage({
       ? ((lastDonePayload.run_id as string | null) ?? null)
       : null;
 
-  if (isToolResult && hideToolCalls) {
-    return null;
-  }
-
-  // An AI message that only carries tool calls has no visible body when tool
-  // calls are hidden. Skip it entirely (avatar included) so it doesn't render
-  // as a lone empty AI icon. Keep it if anything else would render here.
   const customComponents = thread.values.ui?.filter(
     (ui) => ui.metadata?.message_id === message?.id,
   );
   const interruptVisible =
     !!threadInterrupt && (isLastMessage || hasNoAIOrToolMessages);
+
+  // Tool calls and their results are steps in the turn's chain (hosted on the
+  // turn's last AI message), so they never render as messages of their own.
+  // Keep one only if something else would render here.
+  if (isToolResult && !interruptVisible) {
+    return null;
+  }
   if (
     !isToolResult &&
-    hideToolCalls &&
     contentString.length === 0 &&
     (hasToolCalls || hasAnthropicToolCalls) &&
-    !(documents && documents.length > 0) &&
     !debug &&
     !interruptVisible &&
     !customComponents?.length &&
@@ -280,255 +253,185 @@ export function AssistantMessage({
     return null;
   }
 
+  const hasAnswer = contentString.length > 0;
+
   return (
-    <div className="message-animate group flex w-full items-start gap-3">
-      {/* Avatar */}
-      {!isToolResult && (
-        <div className="bg-primary/10 text-primary flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
-          <Bot className="h-4 w-4" />
-        </div>
+    <div
+      className={cn(
+        "group relative flex w-full min-w-0 flex-col gap-3",
+        TURN_GUTTER,
+        animateIn && "message-animate",
       )}
-
-      <div
-        className={cn(
-          "flex min-w-0 flex-1 flex-col gap-3",
-          isToolResult && "ml-11",
-        )}
-      >
-        {isToolResult ? (
-          <>
-            <ToolResult message={message} />
-            <Interrupt
-              interrupt={threadInterrupt}
-              isLastMessage={isLastMessage}
-              hasNoAIOrToolMessages={hasNoAIOrToolMessages}
+    >
+      {isToolResult ? (
+        <Interrupt
+          interrupt={threadInterrupt}
+          isLastMessage={isLastMessage}
+          hasNoAIOrToolMessages={hasNoAIOrToolMessages}
+        />
+      ) : (
+        <>
+          {showLiveThought ? (
+            <ThoughtChain
+              steps={thread.thinkingSteps}
+              live
+              answerStarted={hasAnswer}
+              showDetail={!hideToolCalls}
             />
-          </>
-        ) : (
-          <>
-            {showLiveThought ? (
-              <ThoughtDisclosure
-                steps={thread.thinkingSteps}
-                live
-              />
-            ) : historicalSteps ? (
-              <ThoughtDisclosure steps={historicalSteps} />
-            ) : null}
+          ) : historicalSteps ? (
+            <ThoughtChain
+              steps={historicalSteps}
+              answerStarted={hasAnswer}
+              showDetail={!hideToolCalls}
+            />
+          ) : null}
 
-            {contentString.length > 0 && (
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                {/* Render markdown live as tokens stream in, instead of showing
-                    plain text and only formatting once the stream completes. */}
-                <MarkdownText>{deferredContent}</MarkdownText>
+          {hasAnswer && (
+            // The U closes the chain where the answer begins, and pulses
+            // while the agent is still writing it.
+            <div
+              className={cn("relative min-w-0", showLiveThought && "step-in")}
+            >
+              <span className="sr-only">{APP_NAME}:</span>
+              <AgentMark
+                responding={showLiveThought}
+                className="absolute top-px -left-10"
+              />
+              {/* Render markdown live as tokens stream in, instead of showing
+                  plain text and only formatting once the stream completes. */}
+              <MarkdownText>{deferredContent}</MarkdownText>
+            </div>
+          )}
+
+          {/* Cumulative "Referenced Sources" (append-only, collapsed by
+              default), shown only when THIS answer actually cites into the list
+              — its text carries at least one inline [n] marker resolving to a
+              referenced document (see showReferencedSources). An answer with no
+              inline citation (a follow-up reformat that ran no search, or a
+              plain reply) no longer drags the running list forward. */}
+          {/* The credit closes a finished answer: held back while this turn
+              is still streaming, so it never rides down under new tokens. */}
+          {showReferencedSources &&
+            citationDocuments &&
+            !(isLoading && isLastMessage) && (
+              <DocumentsAnalyzed
+                documents={citationDocuments}
+                cited={cited}
+              />
+            )}
+
+          {debug && <DebugSection debug={debug} />}
+
+          {message && (
+            <CustomComponent
+              message={message}
+              thread={thread}
+            />
+          )}
+
+          <Interrupt
+            interrupt={threadInterrupt}
+            isLastMessage={isLastMessage}
+            hasNoAIOrToolMessages={hasNoAIOrToolMessages}
+          />
+
+          {/* Toolbar row: thumbs up, thumbs down, copy, refresh. Only under an
+              answer, or under a finished turn that ended without one (so it
+              can still be regenerated). */}
+          {/* Held back while this turn streams, like the credit strap, so
+              it never rides down under new tokens. */}
+          {!(isLoading && isLastMessage) &&
+            (hasAnswer || !!historicalSteps) && (
+              <div className="-ml-1.5 flex items-center gap-1">
+                <BranchSwitcher
+                  branch={meta?.branch}
+                  branchOptions={meta?.branchOptions}
+                  onSelect={(branch) => thread.setBranch(branch)}
+                  isLoading={isLoading}
+                />
+                {/* Feedback thumbs sit left of copy/refresh */}
+                <MessageFeedback runId={runId} />
+                <CommandBar
+                  content={contentString}
+                  isLoading={isLoading}
+                  isAiMessage={true}
+                  handleRegenerate={() => handleRegenerate(parentCheckpoint)}
+                />
               </div>
             )}
-
-            {!hideToolCalls && (
-              <>
-                {(hasToolCalls && toolCallsHaveContents && (
-                  <ToolCalls toolCalls={message.tool_calls} />
-                )) ||
-                  (hasAnthropicToolCalls && (
-                    <ToolCalls toolCalls={anthropicStreamedToolCalls} />
-                  )) ||
-                  (hasToolCalls && (
-                    <ToolCalls toolCalls={message.tool_calls} />
-                  ))}
-              </>
-            )}
-
-            {/* Cumulative "Referenced Sources" (append-only, collapsed by
-                default), shown only when THIS answer actually cites into the list
-                — its text carries at least one inline [n] marker resolving to a
-                referenced document (see showReferencedSources). An answer with no
-                inline citation (a follow-up reformat that ran no search, or a
-                plain reply) no longer drags the running list forward. */}
-            {showReferencedSources && citationDocuments && (
-              <DocumentsAnalyzed documents={citationDocuments} />
-            )}
-
-            {debug && <DebugSection debug={debug} />}
-
-            {message && (
-              <CustomComponent
-                message={message}
-                thread={thread}
-              />
-            )}
-
-            <Interrupt
-              interrupt={threadInterrupt}
-              isLastMessage={isLastMessage}
-              hasNoAIOrToolMessages={hasNoAIOrToolMessages}
-            />
-
-            {/* Toolbar row: thumbs up, thumbs down, copy, refresh */}
-            <div className="flex items-center gap-2">
-              <BranchSwitcher
-                branch={meta?.branch}
-                branchOptions={meta?.branchOptions}
-                onSelect={(branch) => thread.setBranch(branch)}
-                isLoading={isLoading}
-              />
-              {/* Feedback thumbs sit left of copy/refresh */}
-              <MessageFeedback runId={runId} />
-              <CommandBar
-                content={contentString}
-                isLoading={isLoading}
-                isAiMessage={true}
-                handleRegenerate={() => handleRegenerate(parentCheckpoint)}
-              />
-            </div>
-          </>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }
 
-// A single collapsed disclosure anchored on top of the assistant answer. It is
-// shown BOTH while the turn is generating (live: header = current activity, e.g.
-// "Searching ServiceNow tickets…", with a pulse) and after it finishes (sealed:
-// header = "Thought for Ns"). Rendering it in the same slot in both states is
-// what stops the old "jump" where the trace only appeared after generation.
-function ThoughtDisclosure({
+// The turn's chain of thought, hosted on its last AI message. Live, its open
+// state is shared through the stream context (null = automatic) so it survives
+// the host changing as each tool call lands; settled, each answer owns its own.
+function ThoughtChain({
   steps,
   live = false,
+  answerStarted,
+  showDetail,
 }: {
   steps: ThinkingStep[];
   live?: boolean;
+  answerStarted: boolean;
+  showDetail: boolean;
 }) {
-  // Settled/historical disclosures own their expand state locally. The LIVE one
-  // reads/writes shared context state so it survives the host AI message changing
-  // mid-turn (each change would otherwise remount a fresh, collapsed disclosure).
   const thread = useStreamContext();
   const [localExpanded, setLocalExpanded] = useState(false);
-  const expanded = live ? thread.liveThoughtExpanded : localExpanded;
-  const setExpanded = live ? thread.setLiveThoughtExpanded : setLocalExpanded;
+  const liveOpen = thread.liveThoughtExpanded ?? !answerStarted;
 
-  if (!steps.length) return null;
-
-  // Total = sum of per-activity durations, so the collapsed header and the
-  // expanded breakdown always reconcile (the "Thinking" gap steps make the
-  // per-activity durations tile the whole turn).
-  const totalMs = steps.reduce((acc, s) => acc + (s.durationMs ?? 0), 0);
-  const hasDurations = steps.some((s) => s.durationMs != null);
-
-  // While live, prefer the currently-open step's label; if all steps have
-  // closed (e.g. search finished and the answer is now streaming), fall back to
-  // the generic working label.
-  const openStep = steps.find((s) => s.endedAt === undefined);
-  const headerLabel = live
-    ? (openStep?.label ?? ACTIVITY_LABELS.working)
-    : hasDurations
-      ? `${ACTIVITY_LABELS.thoughtPrefix} ${Math.max(1, Math.round(totalMs / 1000))}${ACTIVITY_LABELS.thoughtSuffix}`
-      : ACTIVITY_LABELS.thoughtProcess;
+  // While live, mirror what the user sees, so when the turn settles (the same
+  // instance flips to `live={false}`) the chain stays exactly as it was left
+  // and nothing below it moves.
+  useEffect(() => {
+    if (live) setLocalExpanded(liveOpen);
+  }, [live, liveOpen]);
 
   return (
-    <div className="text-muted-foreground text-sm">
-      <button
-        type="button"
-        // Toggle on pointer-down, not click: while the answer streams,
-        // StickToBottom auto-scrolls the list, which can move this button
-        // between mousedown and mouseup so the derived `click` is unreliable.
-        // pointer-down fires on press, immune to the element shifting. We do NOT
-        // also toggle on click — preventDefault here doesn't suppress the click,
-        // so a second toggle there would cancel this one out and look "stuck".
-        onPointerDown={(e) => {
-          e.preventDefault();
-          setExpanded(!expanded);
-        }}
-        // Keyboard equivalent (pointer-down doesn't fire for Enter/Space).
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setExpanded(!expanded);
-          }
-        }}
-        className="hover:text-foreground flex items-center gap-1.5 transition-colors"
-      >
-        <ChevronRight
-          className={cn(
-            "h-3.5 w-3.5 shrink-0 transition-transform",
-            expanded && "rotate-90",
-          )}
-        />
-        {live && (
-          <span className="bg-primary/60 h-1.5 w-1.5 shrink-0 animate-pulse rounded-full" />
-        )}
-        <span className={cn(live && "italic")}>{headerLabel}</span>
-      </button>
-      {expanded && (
-        <div className="mt-2 flex flex-col gap-1.5 pl-1">
-          {steps.map((step) => {
-            const isDone = step.endedAt !== undefined;
-            const isGap = step.key.startsWith("think:");
-            // Per-activity duration (from created_at).
-            const stepSec =
-              step.durationMs !== undefined
-                ? Math.max(1, Math.round(step.durationMs / 1000))
-                : null;
-            return (
-              <div
-                key={`${step.key}-${step.startedAt}`}
-                className="flex items-center gap-2"
-              >
-                {isGap ? (
-                  // Reasoning gap — neutral marker, not a task checkmark.
-                  // Pulses while the gap is still in progress (live thinking).
-                  <div
-                    className={cn(
-                      "border-muted-foreground/50 h-2 w-2 shrink-0 rounded-full border",
-                      !isDone && "bg-muted-foreground/40 animate-pulse",
-                    )}
-                  />
-                ) : isDone ? (
-                  <Check className="text-primary h-3.5 w-3.5 shrink-0" />
-                ) : (
-                  <div className="bg-primary/60 h-2 w-2 shrink-0 animate-pulse rounded-full" />
-                )}
-                <span
-                  className={cn((!isDone || isGap) && "text-muted-foreground")}
-                >
-                  {step.label}
-                </span>
-                {stepSec != null && (
-                  <span className="text-muted-foreground/70 text-xs">
-                    · {ACTIVITY_LABELS.thoughtPrefix} {stepSec}
-                    {ACTIVITY_LABELS.thoughtSuffix}
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+    <TurnChain
+      steps={steps}
+      live={live}
+      answerStarted={answerStarted}
+      expanded={live ? thread.liveThoughtExpanded : localExpanded}
+      onToggle={() =>
+        live
+          ? thread.setLiveThoughtExpanded(!liveOpen)
+          : setLocalExpanded((v) => !v)
+      }
+      showDetail={showDetail}
+    />
   );
 }
 
-export function AssistantMessageLoading({
-  thinkingStep,
-}: {
-  thinkingStep?: string;
-}) {
+// Shown from submit until the turn's first AI message arrives: the same live
+// chain, in the same place, so the hand-off doesn't move anything.
+const STARTING_STEP: ThinkingStep = {
+  // Same key as the turn's first derived "Thinking" step, so it doesn't rise
+  // in a second time when the real steps replace this one.
+  key: "think:0",
+  label: ACTIVITY_LABELS.gettingStarted,
+  startedAt: 0,
+};
+
+export function AssistantMessageLoading() {
+  const thread = useStreamContext();
+  const { hideToolCalls } = useClientConfig();
+  const steps = thread.thinkingSteps.length
+    ? thread.thinkingSteps
+    : [STARTING_STEP];
+
   return (
-    <div className="message-animate flex items-start gap-3">
-      <div className="bg-primary/10 text-primary flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
-        <Bot className="h-4 w-4" />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <div className="bg-muted flex items-center gap-1.5 rounded-2xl px-4 py-3">
-          <div className="bg-muted-foreground/40 h-2 w-2 animate-bounce rounded-full [animation-delay:-0.3s]" />
-          <div className="bg-muted-foreground/40 h-2 w-2 animate-bounce rounded-full [animation-delay:-0.15s]" />
-          <div className="bg-muted-foreground/40 h-2 w-2 animate-bounce rounded-full" />
-        </div>
-        {thinkingStep && (
-          <p className="text-muted-foreground ml-1 text-xs italic">
-            {thinkingStep}
-          </p>
-        )}
-      </div>
+    <div className={cn("message-animate", TURN_GUTTER)}>
+      <TurnChain
+        steps={steps}
+        live
+        answerStarted={false}
+        expanded={thread.liveThoughtExpanded}
+        showDetail={!hideToolCalls}
+      />
     </div>
   );
 }

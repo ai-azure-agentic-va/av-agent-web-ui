@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useTheme } from "next-themes";
 import { Toaster as Sonner, ToasterProps } from "sonner";
 
@@ -11,7 +12,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       toastOptions={{
         classNames: {
           toast:
-            "group toast group-[.toaster]:bg-background group-[.toaster]:text-foreground group-[.toaster]:border-border group-[.toaster]:shadow-lg",
+            "group toast group-[.toaster]:bg-background group-[.toaster]:text-foreground group-[.toaster]:border-foreground group-[.toaster]:rounded-[2px_14px_2px_2px] group-[.toaster]:font-sans group-[.toaster]:shadow-[0_12px_32px_rgb(0_0_0/0.12)]",
           description: "group-[.toast]:text-muted-foreground",
           actionButton:
             "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground font-medium",
@@ -19,6 +20,14 @@ const Toaster = ({ ...props }: ToasterProps) => {
             "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground font-medium",
         },
       }}
+      // richColors toasts follow the palette: the red tint with dark-red text.
+      style={
+        {
+          "--error-bg": "var(--signal-tint)",
+          "--error-border": "var(--signal)",
+          "--error-text": "var(--signal-ink)",
+        } as CSSProperties
+      }
       {...props}
     />
   );

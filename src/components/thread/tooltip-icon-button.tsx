@@ -28,7 +28,7 @@ export const TooltipIconButton = forwardRef<
             variant="ghost"
             size="icon"
             {...rest}
-            className={cn("size-6 p-1", className)}
+            className={cn("size-8 p-1.5", className)}
             ref={ref}
           >
             {children}

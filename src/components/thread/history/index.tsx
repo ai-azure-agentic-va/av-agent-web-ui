@@ -9,15 +9,11 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  MessageSquare,
-  Clock,
-  LoaderCircle,
-} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { RotateCw } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 import { useBackgroundRuns } from "@/lib/background-runs";
-
 
 function ThreadList({
   threads,
@@ -34,22 +30,19 @@ function ThreadList({
 
   if (threads.length === 0) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-          <MessageSquare className="h-6 w-6 text-muted-foreground" />
-        </div>
-        <div>
-          <p className="text-sm font-medium text-foreground">No conversations yet</p>
-          <p className="text-xs text-muted-foreground">
-            Start a new chat to begin
-          </p>
-        </div>
+      <div className="flex flex-1 flex-col gap-1 px-5 py-4">
+        <p className="text-foreground text-sm font-medium">
+          No conversations yet
+        </p>
+        <p className="text-muted-foreground text-sm font-light">
+          Start a new chat to begin
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-1 overflow-y-auto px-2 scrollbar-thin">
+    <div className="flex flex-1 scrollbar-thin flex-col gap-0.5 overflow-y-auto px-3">
       {threads.map((t) => {
         let itemText =
           t.title ||
@@ -65,7 +58,8 @@ function ThreadList({
         ) {
           const firstMessage = t.values.messages[0];
           if (firstMessage?.content !== undefined) {
-            itemText = getContentString(firstMessage.content);
+            // Attachment-only first message has no text — keep the fallback.
+            itemText = getContentString(firstMessage.content) || itemText;
           }
         }
         const updatedAt = t.updated_at
@@ -80,6 +74,8 @@ function ThreadList({
         return (
           <button
             key={t.thread_id}
+            type="button"
+            aria-current={isActive ? "true" : undefined}
             onClick={(e) => {
               e.preventDefault();
               onThreadClick?.(t.thread_id);
@@ -87,31 +83,24 @@ function ThreadList({
               setThreadId(t.thread_id);
             }}
             className={cn(
-              "group flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
-              isActive
-                ? "bg-primary/10 text-primary"
-                : "text-foreground hover:bg-accent"
+              "group text-foreground focus-visible:ring-ring flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left transition-colors outline-none focus-visible:ring-2",
+              isActive ? "bg-muted font-medium" : "hover:bg-muted/60",
             )}
           >
-            <MessageSquare
-              className={cn(
-                "mt-0.5 h-4 w-4 shrink-0",
-                isActive ? "text-primary" : "text-muted-foreground"
-              )}
-            />
             <span className="line-clamp-2 flex-1 text-sm">{itemText}</span>
             {isRunning ? (
+              // Same red as the live strap: this thread is still on air.
               <span
-                className="mt-0.5 shrink-0"
+                className="flex h-5 shrink-0 items-center"
                 role="status"
                 aria-label="Response in progress"
                 title="Response in progress"
               >
-                <LoaderCircle className="h-3.5 w-3.5 animate-spin text-primary" />
+                <span className="live-dot bg-signal size-2 rounded-full" />
               </span>
             ) : (
               updatedAt && (
-                <span className="mt-0.5 shrink-0 text-[11px] text-muted-foreground">
+                <span className="text-muted-foreground mt-0.5 shrink-0 text-xs font-normal">
                   {updatedAt}
                 </span>
               )
@@ -125,27 +114,82 @@ function ThreadList({
 
 function ThreadHistoryLoading() {
   return (
-    <div className="flex flex-1 flex-col gap-2 px-2">
+    <div
+      className="flex flex-1 flex-col gap-2 px-2"
+      role="status"
+      aria-label="Loading conversations"
+    >
       {Array.from({ length: 8 }).map((_, i) => (
-        <div key={`skeleton-${i}`} className="flex items-start gap-3 px-3 py-2.5">
-          <Skeleton className="h-4 w-4 shrink-0 rounded" />
+        <div
+          key={`skeleton-${i}`}
+          className="flex items-start gap-3 px-3 py-2.5"
+        >
           <Skeleton className="h-4 flex-1" />
+          <Skeleton className="h-3 w-9 shrink-0" />
         </div>
       ))}
     </div>
   );
 }
 
+function ThreadHistoryError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      className="flex flex-1 flex-col items-start gap-3 px-5 py-4"
+      role="alert"
+    >
+      <div className="flex flex-col gap-1">
+        <p className="text-foreground text-sm font-medium">
+          Couldn&apos;t load conversations
+        </p>
+        <p className="text-muted-foreground text-sm font-light">
+          Check your connection and try again.
+        </p>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onRetry}
+      >
+        <RotateCw />
+        Try again
+      </Button>
+    </div>
+  );
+}
 
+function ThreadHistoryBody({
+  onThreadClick,
+}: {
+  onThreadClick?: (threadId: string) => void;
+}) {
+  const { refreshThreads, threads, threadsLoading, threadsError } =
+    useThreads();
+  const retry = () => void refreshThreads().catch(console.error);
+
+  // Skeletons only while there is nothing to show yet. Background refreshes
+  // (after every completed run) keep the current list in place instead of
+  // flashing it back to placeholders.
+  if (threads.length === 0) {
+    if (threadsLoading) return <ThreadHistoryLoading />;
+    if (threadsError) return <ThreadHistoryError onRetry={retry} />;
+  }
+  return (
+    <ThreadList
+      threads={threads}
+      onThreadClick={onThreadClick}
+    />
+  );
+}
 
 export default function ThreadHistory() {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
-    parseAsBoolean.withDefault(false)
+    parseAsBoolean.withDefault(false),
   );
 
-  const { refreshThreads, threads, threadsLoading } = useThreads();
+  const { refreshThreads } = useThreads();
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -155,56 +199,44 @@ export default function ThreadHistory() {
   return (
     <>
       {/* Desktop Sidebar */}
-      <div className="hidden h-screen w-[280px] shrink-0 flex-col bg-sidebar lg:flex">
+      <div className="bg-sidebar hidden h-full w-[280px] shrink-0 flex-col lg:flex">
         {/* Header */}
-        <div className="flex h-14 items-center border-b border-sidebar-border px-3">
-          <div className="flex items-center gap-2">
-            <Clock className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold text-foreground">
-              Conversation history
-            </h2>
-          </div>
+        <div className="border-sidebar-border flex h-15 items-center border-b px-6">
+          <h2 className="text-foreground text-[15px] font-semibold">
+            Conversation history
+          </h2>
         </div>
 
         {/* Thread List */}
-        <div className="flex flex-1 flex-col overflow-hidden py-2">
-          {threadsLoading ? (
-            <ThreadHistoryLoading />
-          ) : (
-            <ThreadList threads={threads} />
-          )}
+        <div className="flex flex-1 flex-col overflow-hidden py-3">
+          <ThreadHistoryBody />
         </div>
-
       </div>
 
       {/* Mobile Sheet */}
       <div className="lg:hidden">
         <Sheet
-          open={!!chatHistoryOpen && !isLargeScreen}
+          open={!!chatHistoryOpen && isLargeScreen === false}
           onOpenChange={(open) => {
-            if (isLargeScreen) return;
+            if (isLargeScreen !== false) return;
             setChatHistoryOpen(open);
           }}
         >
-          <SheetContent side="left" className="flex w-[280px] flex-col p-0">
-            <SheetHeader className="border-b border-border px-4 py-3">
-              <SheetTitle className="flex items-center gap-2 text-sm">
-                <Clock className="h-4 w-4" />
+          <SheetContent
+            side="left"
+            className="flex w-[280px] flex-col p-0"
+          >
+            <SheetHeader className="border-border border-b px-6 py-4">
+              <SheetTitle className="text-[15px]">
                 Conversation history
               </SheetTitle>
             </SheetHeader>
 
-            <div className="flex flex-1 flex-col overflow-hidden py-2">
-              {threadsLoading ? (
-                <ThreadHistoryLoading />
-              ) : (
-                <ThreadList
-                  threads={threads}
-                  onThreadClick={() => setChatHistoryOpen(false)}
-                />
-              )}
+            <div className="flex flex-1 flex-col overflow-hidden py-3">
+              <ThreadHistoryBody
+                onThreadClick={() => setChatHistoryOpen(false)}
+              />
             </div>
-
           </SheetContent>
         </Sheet>
       </div>

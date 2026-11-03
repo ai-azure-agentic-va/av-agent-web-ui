@@ -104,29 +104,32 @@ export function linkifyCitations(
   // invented or content-copied marker. Match the marker plus any leading space so
   // dropping an invalid one ("resolved [1] [9999].") leaves clean text; the digit
   // count is unbounded so large numbers are evaluated rather than silently skipped.
-  return content.replace(/(\s*)\[(\d+)\]/g, (match, space: string, numStr: string) => {
-    const num = Number(numStr);
-    const url = urlByIndex.get(num);
-    if (url) {
-      // SharePoint/OneDrive URLs contain spaces (e.g. "/Shared Documents/") and
-      // parentheses, which BREAK a bare markdown destination `(url)` — CommonMark
-      // aborts the link and leaves the raw `[[n]](url)` in the text. Wrap the
-      // destination in <> (an angle-bracket destination may contain spaces and
-      // parens) and %20-encode spaces for a clean href; escape the only chars
-      // that would break the <> form itself.
-      const safeUrl = url
-        .replace(/[<>]/g, encodeURIComponent)
-        .replace(/ /g, "%20");
-      // Preserve any leading whitespace, then link the literal "[n]".
-      return `${space}[\\[${num}\\]](<${safeUrl}>)`;
-    }
-    // A real document for this turn but with no URL to link to: keep the marker
-    // as plain text so the citation signal survives.
-    if (validIndices.has(num)) return match;
-    // Not a document this turn retrieved — an invalid marker. Drop it (and its
-    // leading space) so it never renders as a stray raw bracket.
-    return "";
-  });
+  return content.replace(
+    /(\s*)\[(\d+)\]/g,
+    (match, space: string, numStr: string) => {
+      const num = Number(numStr);
+      const url = urlByIndex.get(num);
+      if (url) {
+        // SharePoint/OneDrive URLs contain spaces (e.g. "/Shared Documents/") and
+        // parentheses, which BREAK a bare markdown destination `(url)` — CommonMark
+        // aborts the link and leaves the raw `[[n]](url)` in the text. Wrap the
+        // destination in <> (an angle-bracket destination may contain spaces and
+        // parens) and %20-encode spaces for a clean href; escape the only chars
+        // that would break the <> form itself.
+        const safeUrl = url
+          .replace(/[<>]/g, encodeURIComponent)
+          .replace(/ /g, "%20");
+        // Preserve any leading whitespace, then link the literal "[n]".
+        return `${space}[\\[${num}\\]](<${safeUrl}>)`;
+      }
+      // A real document for this turn but with no URL to link to: keep the marker
+      // as plain text so the citation signal survives.
+      if (validIndices.has(num)) return match;
+      // Not a document this turn retrieved — an invalid marker. Drop it (and its
+      // leading space) so it never renders as a stray raw bracket.
+      return "";
+    },
+  );
 }
 
 /**
@@ -154,6 +157,28 @@ export function hasInlineCitation(
     if (validIndices.has(Number(match[1]))) return true;
   }
   return false;
+}
+
+/**
+ * The valid citation numbers an answer actually uses, deduplicated, in the order
+ * they first appear in the text. Markers that don't resolve to a referenced
+ * document are skipped, matching linkifyCitations.
+ */
+export function citedIndices(
+  content: string,
+  documents?: { index?: number }[],
+): number[] {
+  if (!content || !documents || documents.length === 0) return [];
+  const validIndices = new Set<number>();
+  documents.forEach((d, i) => validIndices.add(d.index ?? i + 1));
+  const seen = new Set<number>();
+  const re = /\[(\d+)\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(content)) !== null) {
+    const num = Number(match[1]);
+    if (validIndices.has(num)) seen.add(num);
+  }
+  return [...seen];
 }
 
 /**

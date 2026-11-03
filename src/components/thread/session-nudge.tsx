@@ -3,6 +3,7 @@ import { Message } from "@langchain/langgraph-sdk";
 import { SquarePen, XIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { cn } from "@/lib/utils";
+import { cardVariants } from "../ui/card";
 
 /**
  * Session-boundary nudge.
@@ -54,18 +55,20 @@ export function SessionBoundaryNudge({
 
   return (
     <div
+      role="status"
       className={cn(
-        "border-border bg-muted/40 mb-2 flex items-center gap-3 rounded-lg border px-3 py-2 text-sm",
+        cardVariants(),
+        "mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 py-1.5 pr-1.5 pl-4 text-sm sm:flex-nowrap",
       )}
     >
-      <p className="text-muted-foreground flex-1">
-        This conversation is getting long — starting a fresh chat keeps responses
-        fast and accurate.
+      <p className="text-foreground min-w-0 flex-1 basis-56 font-light">
+        This conversation is getting long — starting a fresh chat keeps
+        responses fast and accurate.
       </p>
       <Button
         variant="outline"
         size="sm"
-        className="h-8 gap-1.5"
+        className="h-8 gap-1.5 rounded-full"
         onClick={onStartFresh}
       >
         <SquarePen className="h-3.5 w-3.5" />
@@ -74,7 +77,7 @@ export function SessionBoundaryNudge({
       <button
         type="button"
         onClick={() => setDismissedAtTurn(humanTurns)}
-        className="text-muted-foreground hover:text-foreground"
+        className="text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring flex size-8 shrink-0 items-center justify-center rounded-md transition-colors outline-none focus-visible:ring-2"
         title="Dismiss"
         aria-label="Dismiss"
       >

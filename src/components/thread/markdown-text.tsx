@@ -51,8 +51,8 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
   };
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded-t-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">
-      <span className="lowercase [&>span]:text-xs">{language}</span>
+    <div className="bg-ink-raised flex items-center justify-between gap-4 py-1.5 pr-2 pl-4 text-white">
+      <span className="font-mono text-xs lowercase">{language}</span>
       <TooltipIconButton
         tooltip="Copy"
         onClick={onCopy}
@@ -87,18 +87,31 @@ const LocalTime: FC<{ dateTime?: string; children?: ReactNode }> = ({
     <time
       dateTime={dateTime}
       title={local ? `Source: ${original}` : undefined}
-      className="underline decoration-dotted decoration-1 underline-offset-2"
+      className="decoration-muted-foreground underline decoration-dotted decoration-1 underline-offset-4"
     >
       {local ?? original}
     </time>
   );
 };
 
+// A citation marker is the literal "[n]" that linkifyCitations turns into a link.
+const CITATION_RE = /^\[(\d+)\]$/;
+
+function textOf(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  return "";
+}
+
+// Headings inside an answer sit one small step above the body text: a chat
+// reply is not a document, so a top-level heading must not dwarf the thread.
+// Body copy is Lexend Light; headings and emphasis step up in weight, never in
+// slant (Lexend Deca has no italic).
 const defaultComponents: any = {
   h1: ({ className, ...props }: { className?: string }) => (
     <h1
       className={cn(
-        "mb-8 scroll-m-20 text-4xl font-extrabold tracking-tight last:mb-0",
+        "mt-8 mb-3 scroll-m-20 text-[22px] leading-[30px] font-semibold tracking-[-0.015em] text-balance first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -107,7 +120,7 @@ const defaultComponents: any = {
   h2: ({ className, ...props }: { className?: string }) => (
     <h2
       className={cn(
-        "mt-8 mb-4 scroll-m-20 text-3xl font-semibold tracking-tight first:mt-0 last:mb-0",
+        "mt-7 mb-2.5 scroll-m-20 text-[19px] leading-7 font-semibold tracking-[-0.01em] text-balance first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -116,7 +129,7 @@ const defaultComponents: any = {
   h3: ({ className, ...props }: { className?: string }) => (
     <h3
       className={cn(
-        "mt-6 mb-4 scroll-m-20 text-2xl font-semibold tracking-tight first:mt-0 last:mb-0",
+        "mt-6 mb-2 scroll-m-20 text-[17px] font-semibold text-balance first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -125,7 +138,7 @@ const defaultComponents: any = {
   h4: ({ className, ...props }: { className?: string }) => (
     <h4
       className={cn(
-        "mt-6 mb-4 scroll-m-20 text-xl font-semibold tracking-tight first:mt-0 last:mb-0",
+        "mt-5 mb-2 scroll-m-20 text-[17px] font-medium first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -134,7 +147,7 @@ const defaultComponents: any = {
   h5: ({ className, ...props }: { className?: string }) => (
     <h5
       className={cn(
-        "my-4 text-lg font-semibold first:mt-0 last:mb-0",
+        "mt-5 mb-1.5 text-[15px] font-semibold first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -142,64 +155,116 @@ const defaultComponents: any = {
   ),
   h6: ({ className, ...props }: { className?: string }) => (
     <h6
-      className={cn("my-4 font-semibold first:mt-0 last:mb-0", className)}
+      className={cn(
+        "text-muted-foreground mt-5 mb-1.5 text-[15px] font-semibold first:mt-0 last:mb-0",
+        className,
+      )}
       {...props}
     />
   ),
   p: ({ className, ...props }: { className?: string }) => (
     <p
-      className={cn("mt-5 mb-5 leading-7 first:mt-0 last:mb-0", className)}
+      className={cn("my-4 max-w-[68ch] first:mt-0 last:mb-0", className)}
       {...props}
     />
   ),
-  a: ({ className, ...props }: { className?: string }) => (
-    <a
-      target="_blank"
-      rel="noopener noreferrer"
-      className={cn(
-        "text-primary font-medium underline underline-offset-4",
-        className,
-      )}
+  strong: ({ className, ...props }: { className?: string }) => (
+    <strong
+      className={cn("font-semibold", className)}
       {...props}
     />
   ),
+  em: ({ className, ...props }: { className?: string }) => (
+    <em
+      className={cn("font-normal not-italic", className)}
+      {...props}
+    />
+  ),
+  a: ({
+    className,
+    children,
+    ...props
+  }: {
+    className?: string;
+    children?: ReactNode;
+  }) => {
+    const citation = CITATION_RE.exec(textOf(children));
+    if (citation) {
+      return (
+        <a
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`Source ${citation[1]}`}
+          className={cn("citation", className)}
+          {...props}
+        >
+          {citation[1]}
+        </a>
+      );
+    }
+    return (
+      <a
+        target="_blank"
+        rel="noopener noreferrer"
+        className={cn(
+          "text-foreground decoration-signal/60 hover:decoration-signal focus-visible:ring-ring rounded-[2px] font-normal underline decoration-1 underline-offset-4 transition-colors outline-none hover:decoration-2 focus-visible:ring-2",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </a>
+    );
+  },
   blockquote: ({ className, ...props }: { className?: string }) => (
     <blockquote
-      className={cn("border-l-2 pl-6 italic", className)}
+      className={cn(
+        "border-foreground text-muted-foreground my-4 border-l-2 pl-4 first:mt-0 last:mb-0",
+        className,
+      )}
       {...props}
     />
   ),
   ul: ({ className, ...props }: { className?: string }) => (
     <ul
-      className={cn("my-5 ml-6 list-disc [&>li]:mt-2", className)}
-      {...props}
-    />
-  ),
-  ol: ({ className, ...props }: { className?: string }) => (
-    <ol
-      className={cn("my-5 ml-6 list-decimal [&>li]:mt-2", className)}
-      {...props}
-    />
-  ),
-  hr: ({ className, ...props }: { className?: string }) => (
-    <hr
-      className={cn("my-5 border-b", className)}
-      {...props}
-    />
-  ),
-  table: ({ className, ...props }: { className?: string }) => (
-    <table
       className={cn(
-        "my-5 w-full border-separate border-spacing-0 overflow-y-auto",
+        "my-4 ml-6 max-w-[66ch] list-disc first:mt-0 last:mb-0 [&>li]:mt-1.5 [&>li]:pl-1",
         className,
       )}
       {...props}
     />
   ),
+  ol: ({ className, ...props }: { className?: string }) => (
+    <ol
+      className={cn(
+        "marker:text-muted-foreground my-4 ml-6 max-w-[66ch] list-decimal first:mt-0 last:mb-0 [&>li]:mt-1.5 [&>li]:pl-1",
+        className,
+      )}
+      {...props}
+    />
+  ),
+  hr: ({ className, ...props }: { className?: string }) => (
+    <hr
+      className={cn("border-border my-6 border-b", className)}
+      {...props}
+    />
+  ),
+  // Wide tables scroll inside the answer instead of widening the whole thread.
+  table: ({ className, ...props }: { className?: string }) => (
+    <div className="my-5 scrollbar-thin overflow-x-auto first:mt-0 last:mb-0">
+      <table
+        className={cn(
+          "w-full border-separate border-spacing-0 text-[15px] leading-6",
+          className,
+        )}
+        {...props}
+      />
+    </div>
+  ),
   th: ({ className, ...props }: { className?: string }) => (
     <th
       className={cn(
-        "bg-muted px-4 py-2 text-left font-bold first:rounded-tl-lg last:rounded-tr-lg [&[align=center]]:text-center [&[align=right]]:text-right",
+        "bg-muted border-y border-l px-3 py-2 text-left text-sm font-medium first:rounded-tl-[2px] last:rounded-tr-[14px] last:border-r [&[align=center]]:text-center [&[align=right]]:text-right",
         className,
       )}
       {...props}
@@ -208,7 +273,7 @@ const defaultComponents: any = {
   td: ({ className, ...props }: { className?: string }) => (
     <td
       className={cn(
-        "border-b border-l px-4 py-2 text-left last:border-r [&[align=center]]:text-center [&[align=right]]:text-right",
+        "border-b border-l px-3 py-2 text-left align-top tabular-nums last:border-r [&[align=center]]:text-center [&[align=right]]:text-right",
         className,
       )}
       {...props}
@@ -217,7 +282,7 @@ const defaultComponents: any = {
   tr: ({ className, ...props }: { className?: string }) => (
     <tr
       className={cn(
-        "m-0 border-b p-0 first:border-t [&:last-child>td:first-child]:rounded-bl-lg [&:last-child>td:last-child]:rounded-br-lg",
+        "m-0 p-0 [&:last-child>td:first-child]:rounded-bl-[2px] [&:last-child>td:last-child]:rounded-br-[2px]",
         className,
       )}
       {...props}
@@ -233,7 +298,7 @@ const defaultComponents: any = {
   pre: ({ className, ...props }: { className?: string }) => (
     <pre
       className={cn(
-        "max-w-4xl overflow-x-auto rounded-lg bg-black text-white",
+        "corner-step my-4 max-w-4xl overflow-x-auto bg-black text-[13px] leading-6 text-white first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -271,7 +336,7 @@ const defaultComponents: any = {
 
     return (
       <code
-        className={cn("rounded font-semibold", className)}
+        className={cn("rounded font-normal", className)}
         {...props}
       >
         {children}
@@ -283,7 +348,7 @@ const defaultComponents: any = {
 const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
   const blocks = useMemo(() => splitMarkdownBlocks(children), [children]);
   return (
-    <div className="markdown-content">
+    <div className="markdown-content text-[17px] leading-[29px] font-light">
       {blocks.map((block, i) => (
         // Index keys are stable here: blocks only append (or the tail grows)
         // while an answer streams, so earlier entries keep their key/content.

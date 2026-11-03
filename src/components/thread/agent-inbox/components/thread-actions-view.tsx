@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Interrupt } from "@langchain/langgraph-sdk";
 import { Button } from "@/components/ui/button";
+import {
+  CardBody,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { ThreadIdCopyable } from "./thread-id";
 import { InboxItemInput } from "./inbox-item-input";
 import useInterruptedActions from "../hooks/use-interrupted-actions";
@@ -16,6 +22,8 @@ interface ThreadActionsViewProps {
   handleShowSidePanel: (showState: boolean, showDescription: boolean) => void;
   showState: boolean;
   showDescription: boolean;
+  /** Picks between several pending interrupts; heads the card body. */
+  switcher?: ReactNode;
 }
 
 function ButtonGroup({
@@ -35,7 +43,7 @@ function ButtonGroup({
         variant="outline"
         className={cn(
           "rounded-l-md rounded-r-none border-r-[0px]",
-          showingState ? "text-black" : "bg-white",
+          showingState ? "text-foreground" : "bg-background",
         )}
         size="sm"
         onClick={handleShowState}
@@ -46,7 +54,7 @@ function ButtonGroup({
         variant="outline"
         className={cn(
           "rounded-l-none rounded-r-md border-l-[0px]",
-          showingDescription ? "text-black" : "bg-white",
+          showingDescription ? "text-foreground" : "bg-background",
         )}
         size="sm"
         onClick={handleShowDescription}
@@ -76,6 +84,12 @@ function getDecisionStatus(
   return decision.type;
 }
 
+const STATUS_LABEL: Record<DecisionType, string> = {
+  approve: "approved",
+  edit: "edited",
+  reject: "rejected",
+};
+
 function getActionTitle(action?: ActionRequest) {
   return action?.name ?? "Unknown interrupt";
 }
@@ -85,6 +99,7 @@ export function ThreadActionsView({
   handleShowSidePanel,
   showDescription,
   showState,
+  switcher,
 }: ThreadActionsViewProps) {
   const stream = useStreamContext();
   const [threadId] = useQueryState("threadId");
@@ -298,25 +313,28 @@ export function ThreadActionsView({
 
   if (!isValidHitlRequest(interrupt)) {
     return (
-      <div className="flex min-h-full w-full flex-col items-center justify-center rounded-2xl bg-gray-50/50 p-8">
-        <p className="text-sm text-gray-600">
+      <CardBody>
+        <p className="text-muted-foreground text-sm">
           Unable to render interrupt. The data provided is not in the expected
           HITL format.
         </p>
-      </div>
+      </CardBody>
     );
   }
   const interruptValue = singleActionInterrupt.value as HITLRequest;
 
   return (
-    <div className="flex min-h-full w-full max-w-full flex-col gap-9">
-      <div className="flex w-full flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center justify-start gap-3">
-          <p className="text-2xl tracking-tighter text-pretty">
+    <>
+      <CardHeader className="flex-wrap gap-y-1">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <CardTitle
+            as="h2"
+            className="min-w-0 text-pretty"
+          >
             {hasMultipleActions
               ? `${currentTitle} (${currentIndex + 1}/${actionRequests.length})`
               : currentTitle}
-          </p>
+          </CardTitle>
           {threadId && <ThreadIdCopyable threadId={threadId} />}
         </div>
         <div className="flex flex-row items-center justify-start gap-2">
@@ -324,7 +342,7 @@ export function ThreadActionsView({
             <Button
               size="sm"
               variant="outline"
-              className="flex items-center gap-1 bg-white"
+              className="bg-background flex items-center gap-1"
               onClick={handleOpenInStudio}
             >
               Studio
@@ -337,74 +355,88 @@ export function ThreadActionsView({
             showingDescription={showDescription}
           />
         </div>
-      </div>
+      </CardHeader>
 
-      <div className="flex w-full flex-row flex-wrap items-center justify-start gap-2">
-        <Button
-          variant="outline"
-          className="border-gray-500 bg-white font-normal text-gray-800"
-          onClick={handleResolve}
-          disabled={actionsDisabled}
-        >
-          Mark as Resolved
-        </Button>
-        {hasMultipleActions && allAllowApprove && (
+      <CardBody className="flex w-full max-w-full flex-col gap-5">
+        {switcher}
+
+        <div className="flex w-full flex-row flex-wrap items-center justify-start gap-2">
           <Button
             variant="outline"
-            className="border-gray-500 bg-white font-normal text-gray-800"
-            onClick={handleApproveAll}
+            size="sm"
+            onClick={handleResolve}
             disabled={actionsDisabled}
           >
-            Approve All
+            Mark as resolved
           </Button>
-        )}
-      </div>
-
-      {hasMultipleActions && (
-        <div className="flex w-full items-center gap-2">
-          {actionRequests.map((_, index) => {
-            const status = getDecisionStatus(addressedActions.get(index));
-            return (
-              <button
-                type="button"
-                key={index}
-                onClick={() => setCurrentIndex(index)}
-                className={cn(
-                  "h-2 flex-1 rounded-full border transition-colors",
-                  "border-gray-300 bg-gray-200",
-                  status === "approve" && "border-emerald-500 bg-emerald-200",
-                  status === "reject" && "border-red-500 bg-red-200",
-                  status === "edit" && "border-amber-500 bg-amber-200",
-                  index === currentIndex &&
-                    "outline-primary outline-2 outline-offset-2",
-                )}
-              >
-                <span className="sr-only">Action {index + 1}</span>
-              </button>
-            );
-          })}
+          {hasMultipleActions && allAllowApprove && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleApproveAll}
+              disabled={actionsDisabled}
+            >
+              Approve all
+            </Button>
+          )}
         </div>
-      )}
 
-      <InboxItemInput
-        approveAllowed={approveAllowed}
-        hasEdited={hasEdited}
-        hasAddedResponse={hasAddedResponse}
-        interruptValue={interruptValue}
-        humanResponse={humanResponse}
-        initialValues={initialHumanInterruptEditValue.current}
-        setHumanResponse={setHumanResponse}
-        supportsMultipleMethods={supportsMultipleMethods}
-        setSelectedSubmitType={setSelectedSubmitType}
-        setHasAddedResponse={setHasAddedResponse}
-        setHasEdited={setHasEdited}
-        handleSubmit={hasMultipleActions ? handleSaveDecision : handleSubmit}
-        isLoading={hasMultipleActions ? submittingAll : loading}
-        selectedSubmitType={selectedSubmitType}
-      />
+        {hasMultipleActions && (
+          <div className="flex w-full items-center gap-2">
+            {actionRequests.map((_, index) => {
+              const status = getDecisionStatus(addressedActions.get(index));
+              const label = `Action ${index + 1}${status ? `: ${STATUS_LABEL[status]}` : ""}`;
+              return (
+                <button
+                  type="button"
+                  key={index}
+                  onClick={() => setCurrentIndex(index)}
+                  title={label}
+                  className={cn(
+                    "focus-visible:ring-ring h-2 flex-1 rounded-full border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+                    "border-border bg-border",
+                    // No green or amber in the palette: approved is black, edited
+                    // is a black outline, rejected takes the red tint.
+                    status === "approve" && "border-foreground bg-foreground",
+                    status === "edit" && "border-foreground bg-background",
+                    status === "reject" && "border-signal-ink bg-signal-tint",
+                    index === currentIndex &&
+                      "outline-foreground outline-2 outline-offset-2",
+                  )}
+                >
+                  <span className="sr-only">{label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <InboxItemInput
+          approveAllowed={approveAllowed}
+          hasEdited={hasEdited}
+          hasAddedResponse={hasAddedResponse}
+          interruptValue={interruptValue}
+          humanResponse={humanResponse}
+          initialValues={initialHumanInterruptEditValue.current}
+          setHumanResponse={setHumanResponse}
+          supportsMultipleMethods={supportsMultipleMethods}
+          setSelectedSubmitType={setSelectedSubmitType}
+          setHasAddedResponse={setHasAddedResponse}
+          setHasEdited={setHasEdited}
+          handleSubmit={hasMultipleActions ? handleSaveDecision : handleSubmit}
+          isLoading={hasMultipleActions ? submittingAll : loading}
+          selectedSubmitType={selectedSubmitType}
+        />
+
+        {!hasMultipleActions && streamFinished && (
+          <p className="text-foreground text-sm font-medium">
+            Successfully finished Graph invocation.
+          </p>
+        )}
+      </CardBody>
 
       {hasMultipleActions && (
-        <div className="flex w-full items-center justify-between">
+        <CardFooter className="justify-between">
           <div className="flex gap-2">
             <Button
               variant="outline"
@@ -428,7 +460,7 @@ export function ThreadActionsView({
             </Button>
           </div>
           <Button
-            variant="brand"
+            variant="default"
             disabled={!hasAllDecisions || submittingAll}
             onClick={handleSubmitAll}
           >
@@ -436,14 +468,8 @@ export function ThreadActionsView({
               ? "Submitting..."
               : `Submit all ${actionRequests.length} decisions`}
           </Button>
-        </div>
+        </CardFooter>
       )}
-
-      {!hasMultipleActions && streamFinished && (
-        <p className="text-base font-medium text-green-600">
-          Successfully finished Graph invocation.
-        </p>
-      )}
-    </div>
+    </>
   );
 }

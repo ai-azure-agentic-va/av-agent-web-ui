@@ -26,6 +26,12 @@ export const ACTIVITY_LABELS = {
   thoughtSuffix: "s",
   // Header used when no durations are available (e.g. a turn with no activities).
   thoughtProcess: "Thought process",
+  // Header for a turn that ended before every step finished (stopped or cut off).
+  stoppedPrefix: "Stopped after",
+  // A step that never finished because the run ended.
+  stopped: "Stopped",
+  // Step count in the chain header, e.g. "4 steps".
+  stepNoun: { one: "step", many: "steps" },
 
   // Subagent-delegation phases, keyed by the `task` tool call's `subagent_type`.
   subagents: {
@@ -91,7 +97,8 @@ function humanize(name: string): string {
 //   • other tools  → the mapped tool label, else a generic "Using X".
 // Returns null only when the tool call has no name.
 export function resolveToolActivity(
-  toolCall: { name?: string; args?: Record<string, unknown> } | null | undefined,
+  toolCall:
+    { name?: string; args?: Record<string, unknown> } | null | undefined,
 ): { running: string; done: string } | null {
   const name = toolCall?.name;
   if (!name) return null;
@@ -106,7 +113,10 @@ export function resolveToolActivity(
         }
       );
     }
-    return { running: "Delegating to a subagent…", done: "Delegation complete" };
+    return {
+      running: "Delegating to a subagent…",
+      done: "Delegation complete",
+    };
   }
 
   return (

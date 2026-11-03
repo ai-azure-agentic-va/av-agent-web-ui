@@ -3,6 +3,7 @@
 import { signIn } from "next-auth/react";
 import { useEffect } from "react";
 import { AppLogo } from "@/components/icons/app-logo";
+import { LiveLine } from "@/components/thread/turn-chain";
 import { APP_NAME } from "@/lib/app-config";
 
 export default function SignInPage() {
@@ -12,18 +13,16 @@ export default function SignInPage() {
   }, []);
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-background">
-      <div className="flex flex-col items-center gap-4 text-center">
-        <AppLogo width={48} height={48} />
-        <h1 className="text-xl font-semibold text-foreground">
+    <div className="bg-background flex min-h-dvh w-full items-center justify-center px-6">
+      <div className="flex w-full max-w-[420px] flex-col items-start gap-6">
+        <AppLogo
+          width={40}
+          height={40}
+        />
+        <h1 className="text-foreground text-[32px] leading-[1.15] font-semibold tracking-[-0.025em]">
           {APP_NAME}
         </h1>
-        <p className="text-sm text-muted-foreground">
-          Redirecting to Microsoft sign-in...
-        </p>
-        <div className="mt-2 h-1 w-32 overflow-hidden rounded-full bg-muted">
-          <div className="h-full animate-pulse rounded-full bg-primary" />
-        </div>
+        <LiveLine label="Redirecting to Microsoft sign-in…" />
       </div>
     </div>
   );

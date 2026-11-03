@@ -21,11 +21,11 @@
 export const UTC_TIMESTAMP_RE =
   /\b(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)\s*UTC\b/gi;
 
-// A second zone right after the "UTC" — "2026-06-02 04:00 UTC CDT", "… UTC
+// A second zone right after the "UTC" — "2026-06-02 04:00 UTC PDT", "… UTC
 // (CDT)", "… UTC -05:00" — means the label is wrong: the digits are a time the
 // user gave in their own zone, labelled UTC by the model. Converting it would
-// shift it by that zone's offset (4 am CDT showed as 23:00 the day before,
-// still followed by "CDT"), so such a time is left exactly as written. Same
+// shift it by that zone's offset (4 am PDT showed as 21:00 the day before,
+// still followed by "PDT"), so such a time is left exactly as written. Same
 // line only, and case-sensitive: zone abbreviations are written in capitals.
 const ZONE_AFTER_UTC_RE =
   /^[ \t]*[([]?[ \t]*(?:[ECMP][SD]?T|AK[SD]T|HST|IST|BST|CES?T|GMT|[+-]\d{2}:\d{2})(?![A-Za-z])/;
