@@ -67,6 +67,19 @@ import {
   STARTER_TILE_COUNT,
   type StarterPrompt,
 } from "./prompt-library";
+import {
+  type UserSkill,
+  buildMessageContent,
+  useUserSkills,
+} from "@/lib/user-skills";
+import { SkillView } from "./skills/skill-view";
+import { useOpenSkill } from "./skills/state";
+import {
+  SkillChip,
+  SkillPicker,
+  SkillPickerButton,
+  useSkillMention,
+} from "./skills/composer-skill";
 
 const ssoEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH !== "true";
 
@@ -129,6 +142,9 @@ type ChatInputProps = {
   libraryOpen: boolean;
   onLibraryOpenChange: (open: boolean) => void;
   onPickPrompt: (message: string) => void;
+  skill: UserSkill | null;
+  onPickSkill: (id: string) => void;
+  onRemoveSkill: () => void;
 };
 
 function ChatInput({
@@ -144,17 +160,34 @@ function ChatInput({
   libraryOpen,
   onLibraryOpenChange,
   onPickPrompt,
+  skill,
+  onPickSkill,
+  onRemoveSkill,
 }: ChatInputProps) {
   const clientConfig = useClientConfig();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const libraryId = useId();
+  const mention = useSkillMention({
+    value: input,
+    setValue: setInput,
+    textareaRef,
+    onPick: (s) => onPickSkill(s.id),
+  });
   const hasPrompts = prompts.length > 0;
-  const showFooter = clientConfig.enableFileUpload || hasPrompts;
+  const showFooter =
+    clientConfig.enableFileUpload || hasPrompts || mention.hasSkills;
   return (
     // The library card is the composer's sibling, not its child, so focus in
     // the card doesn't light the composer's halo and the form never sees it.
     <div className="relative">
+      <SkillPicker mention={mention} />
+      <span
+        role="status"
+        className="sr-only"
+      >
+        {mention.status}
+      </span>
       {hasPrompts && (
         <PromptLibraryCard
           id={libraryId}
@@ -181,8 +214,14 @@ function ChatInput({
           onSubmit={handleSubmit}
           className="flex flex-col"
         >
-          {upload.contentBlocks.length > 0 && (
+          {(skill || upload.contentBlocks.length > 0) && (
             <div className="flex flex-wrap items-start gap-2 px-3 pt-3">
+              {skill && (
+                <SkillChip
+                  skill={skill}
+                  onRemove={onRemoveSkill}
+                />
+              )}
               {upload.contentBlocks.map((block, idx) => (
                 <MultimodalPreview
                   key={idx}
@@ -198,9 +237,12 @@ function ChatInput({
             <textarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={mention.handleChange}
+              {...mention.textareaProps}
               onPaste={upload.handlePaste}
               onKeyDown={(e) => {
+                // An open skill list takes the arrows, Enter, Tab and Escape.
+                if (mention.handleKeyDown(e)) return;
                 if (
                   e.key === "Enter" &&
                   !e.shiftKey &&
@@ -293,6 +335,9 @@ function ChatInput({
                     controlsId={libraryId}
                   />
                 )}
+                {mention.hasSkills && (
+                  <SkillPickerButton onClick={mention.start} />
+                )}
               </div>
             </div>
           )}
@@ -384,6 +429,7 @@ export function Thread() {
   const [starterPromptsLoading, setStarterPromptsLoading] = useState(true);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
+  const [openSkill, setOpenSkill] = useOpenSkill();
 
   const stream = useStreamContext();
   const messages = stream.messages;
@@ -404,6 +450,16 @@ export function Thread() {
   const contentBlocksRef = useRef(upload.contentBlocks);
   contentBlocksRef.current = upload.contentBlocks;
 
+  // The skill waiting in the composer for the next typed message. Held by id
+  // so an edit to the skill is picked up, and a deleted one simply drops off.
+  const skills = useUserSkills();
+  const [attachedSkillId, setAttachedSkillId] = useState<string | null>(null);
+  const attachedSkill = attachedSkillId
+    ? (skills.find((s) => s.id === attachedSkillId) ?? null)
+    : null;
+  const attachedSkillRef = useRef(attachedSkill);
+  attachedSkillRef.current = attachedSkill;
+
   const lastError = useRef<string | undefined>(undefined);
 
   // When the current turn started, shared with the live chain in the thread so
@@ -421,6 +477,7 @@ export function Thread() {
   const setThreadId = (id: string | null) => {
     _setThreadId(id);
     closeArtifact();
+    void setOpenSkill(null);
   };
 
   // Fetch starter prompts once on mount
@@ -472,14 +529,15 @@ export function Thread() {
         overrideText === undefined ? contentBlocksRef.current : [];
       if ((text.length === 0 && attachments.length === 0) || stream.isLoading)
         return;
+      // So does an attached skill: it travels as its own text block after the
+      // person's words, which the UI leaves out wherever it shows their text.
+      const skill =
+        overrideText === undefined ? attachedSkillRef.current : null;
 
       const newHumanMessage: Message = {
         id: uuidv4(),
         type: "human",
-        content: [
-          ...(text ? [{ type: "text", text }] : []),
-          ...attachments,
-        ] as Message["content"],
+        content: buildMessageContent(text, skill, attachments),
       };
 
       const toolMessages = ensureToolCallsHaveResponses(stream.messages);
@@ -509,6 +567,7 @@ export function Thread() {
       if (overrideText === undefined) {
         setInput("");
         resetBlocks();
+        setAttachedSkillId(null);
       }
     },
     [resetBlocks],
@@ -547,6 +606,17 @@ export function Thread() {
       el.scrollTop = el.scrollHeight;
     });
   }, []);
+
+  // "Use in chat" on a skill: back to the conversation the person was in,
+  // with the skill on the composer, waiting for them to type.
+  const handleUseSkill = useCallback(
+    (id: string) => {
+      setAttachedSkillId(id);
+      void setOpenSkill(null);
+      requestAnimationFrame(() => chatInputRef.current?.focus());
+    },
+    [setOpenSkill],
+  );
 
   // Clicking a follow-up suggestion sends it immediately as a new turn,
   // through the same submit path as the composer (tool-call reconciliation
@@ -644,9 +714,7 @@ export function Thread() {
                         size="icon"
                         className="h-10 w-10"
                         aria-label={
-                          chatHistoryOpen
-                            ? "Close conversation history"
-                            : "Open conversation history"
+                          chatHistoryOpen ? "Close sidebar" : "Open sidebar"
                         }
                         aria-expanded={!!chatHistoryOpen}
                         onClick={() => setChatHistoryOpen((p) => !p)}
@@ -695,8 +763,17 @@ export function Thread() {
               <HeaderAccount ssoEnabled={ssoEnabled} />
             </header>
 
+            {/* A skill opened from the sidebar takes the reading column. The
+              conversation is only hidden, so it comes back where it was. */}
+            {openSkill && <SkillView onUse={handleUseSkill} />}
+
             {/* Chat Area */}
-            <StickToBottom className="relative flex-1 overflow-hidden">
+            <StickToBottom
+              className={cn(
+                "relative flex-1 overflow-hidden",
+                openSkill && "hidden",
+              )}
+            >
               <StickyToBottomContent
                 className={cn(
                   "absolute inset-0 scrollbar-thin overflow-y-auto px-4",
@@ -749,6 +826,9 @@ export function Thread() {
                             libraryOpen={libraryOpen}
                             onLibraryOpenChange={setLibraryOpen}
                             onPickPrompt={handlePickPrompt}
+                            skill={attachedSkill}
+                            onPickSkill={setAttachedSkillId}
+                            onRemoveSkill={() => setAttachedSkillId(null)}
                           />
                         </div>
 
@@ -897,7 +977,12 @@ export function Thread() {
             {chatStarted && (
               // A short white fade lets the thread scroll under the composer
               // instead of ending on a hard rule.
-              <div className="bg-background relative px-4 pt-2 pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-gradient-to-t before:from-white before:to-transparent">
+              <div
+                className={cn(
+                  "bg-background relative px-4 pt-2 pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-gradient-to-t before:from-white before:to-transparent",
+                  openSkill && "hidden",
+                )}
+              >
                 <div className="mx-auto max-w-[780px]">
                   <SessionBoundaryNudge
                     messages={messages}
@@ -917,6 +1002,9 @@ export function Thread() {
                     libraryOpen={libraryOpen}
                     onLibraryOpenChange={setLibraryOpen}
                     onPickPrompt={handlePickPrompt}
+                    skill={attachedSkill}
+                    onPickSkill={setAttachedSkillId}
+                    onRemoveSkill={() => setAttachedSkillId(null)}
                   />
                 </div>
               </div>

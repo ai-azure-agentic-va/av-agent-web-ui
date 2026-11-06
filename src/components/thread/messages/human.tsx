@@ -1,12 +1,14 @@
 import { useStreamContext } from "@/providers/Stream";
 import { Message } from "@langchain/langgraph-sdk";
 import { useState } from "react";
+import { ScrollText } from "lucide-react";
 import { getContentString } from "../utils";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
 import { isBase64ContentBlock } from "@/lib/multimodal-utils";
+import { getMessageSkillName, isSkillBlock } from "@/lib/user-skills";
 import { HumanMark } from "../speaker";
 import { TURN_GUTTER } from "../turn-chain";
 
@@ -59,24 +61,27 @@ export function HumanMessage({
   const [isEditing, setIsEditing] = useState(false);
   const [value, setValue] = useState("");
   const contentString = getContentString(message.content);
+  const skillName = getMessageSkillName(message.content);
   const isHeadline =
     contentString.length <= HEADLINE_MAX_CHARS && !contentString.includes("\n");
 
   const handleSubmitEdit = () => {
     setIsEditing(false);
 
-    // Editing only rewrites the text; carry the original attachments over so
-    // the re-run still sees them.
-    const attachments = Array.isArray(message.content)
-      ? message.content.filter(isBase64ContentBlock)
+    // Editing only rewrites the text; carry the original skill and
+    // attachments over so the re-run still sees them.
+    const carried = Array.isArray(message.content)
+      ? message.content.filter(
+          (block) => isSkillBlock(block) || isBase64ContentBlock(block),
+        )
       : [];
     const newMessage: Message = {
       type: "human",
       content:
-        attachments.length > 0
+        carried.length > 0
           ? ([
               ...(value.trim() ? [{ type: "text", text: value }] : []),
-              ...attachments,
+              ...carried,
             ] as Message["content"])
           : value,
     };
@@ -203,6 +208,15 @@ export function HumanMessage({
               >
                 <span className="sr-only">You: </span>
                 {contentString}
+              </p>
+            )}
+            {skillName && (
+              <p className="text-muted-foreground flex items-center gap-1.5 text-[13px] font-medium">
+                <ScrollText
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0"
+                />
+                <span className="min-w-0 truncate">Skill · {skillName}</span>
               </p>
             )}
             {actions}

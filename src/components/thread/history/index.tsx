@@ -1,19 +1,20 @@
 import { ConversationThread, useThreads } from "@/providers/Thread";
-import { useEffect } from "react";
+import { KeyboardEvent, useEffect, useRef } from "react";
 import { getContentString } from "../utils";
 import { useQueryState, parseAsBoolean } from "nuqs";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { RotateCw } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 import { useBackgroundRuns } from "@/lib/background-runs";
+import { SkillList } from "../skills/skill-list";
+import {
+  type SidebarView,
+  useOpenSkill,
+  useSidebarView,
+} from "../skills/state";
 
 function ThreadList({
   threads,
@@ -23,6 +24,7 @@ function ThreadList({
   onThreadClick?: (threadId: string) => void;
 }) {
   const [threadId, setThreadId] = useQueryState("threadId");
+  const [, setOpenSkill] = useOpenSkill();
   // Threads with a run still streaming in this tab (kept alive server-side by
   // resumable submits) — badge them so the user can tell which conversations
   // are working in the background while they browse others.
@@ -79,6 +81,8 @@ function ThreadList({
             onClick={(e) => {
               e.preventDefault();
               onThreadClick?.(t.thread_id);
+              // A conversation takes the reading column back from a skill.
+              void setOpenSkill(null);
               if (t.thread_id === threadId) return;
               setThreadId(t.thread_id);
             }}
@@ -182,6 +186,103 @@ function ThreadHistoryBody({
   );
 }
 
+const VIEWS: { value: SidebarView; label: string }[] = [
+  { value: "conversations", label: "Conversations" },
+  { value: "skills", label: "Skills" },
+];
+
+// The sidebar's two lists behind one segmented switch in its 60px head: a
+// tab list, with the arrow keys moving between the two tabs.
+function SidebarPanels({
+  idPrefix,
+  onNavigate,
+  headClassName,
+}: {
+  // Fixed per placement (rail or sheet) rather than from useId: these ids are
+  // server-rendered, and a tree-position id can come out different on the
+  // client, which React reports as a hydration mismatch and never repairs.
+  idPrefix: string;
+  // Called when a row takes the person somewhere, so the mobile sheet closes.
+  onNavigate?: () => void;
+  headClassName?: string;
+}) {
+  const [view, setView] = useSidebarView();
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const tabId = (v: SidebarView) => `${idPrefix}-tab-${v}`;
+  const panelId = `${idPrefix}-panel`;
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const current = VIEWS.findIndex((v) => v.value === view);
+    const next =
+      (current + (e.key === "ArrowRight" ? 1 : -1) + VIEWS.length) %
+      VIEWS.length;
+    void setView(VIEWS[next].value);
+    tabRefs.current[next]?.focus();
+  };
+
+  return (
+    <>
+      <div
+        className={cn(
+          "border-sidebar-border flex h-15 shrink-0 items-center border-b px-4",
+          headClassName,
+        )}
+      >
+        <div
+          role="tablist"
+          aria-label="Sidebar"
+          onKeyDown={handleKeyDown}
+          className="border-foreground grid w-full grid-cols-2 rounded-md border p-0.5"
+        >
+          {VIEWS.map((v, i) => {
+            const selected = v.value === view;
+            return (
+              <button
+                key={v.value}
+                ref={(el) => {
+                  tabRefs.current[i] = el;
+                }}
+                type="button"
+                role="tab"
+                id={tabId(v.value)}
+                aria-selected={selected}
+                aria-controls={panelId}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => void setView(v.value)}
+                className={cn(
+                  "focus-visible:ring-ring rounded-[6px] py-1.5 text-[13px] font-medium transition-colors outline-none focus-visible:ring-2",
+                  selected
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {v.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div
+        role="tabpanel"
+        id={panelId}
+        aria-labelledby={tabId(view)}
+        className="flex flex-1 flex-col overflow-hidden"
+      >
+        {view === "skills" ? (
+          <SkillList onNavigate={onNavigate} />
+        ) : (
+          <div className="flex flex-1 flex-col overflow-hidden py-3">
+            <ThreadHistoryBody onThreadClick={onNavigate} />
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 export default function ThreadHistory() {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
@@ -200,17 +301,7 @@ export default function ThreadHistory() {
     <>
       {/* Desktop Sidebar */}
       <div className="bg-sidebar hidden h-full w-[280px] shrink-0 flex-col lg:flex">
-        {/* Header */}
-        <div className="border-sidebar-border flex h-15 items-center border-b px-6">
-          <h2 className="text-foreground text-[15px] font-semibold">
-            Conversation history
-          </h2>
-        </div>
-
-        {/* Thread List */}
-        <div className="flex flex-1 flex-col overflow-hidden py-3">
-          <ThreadHistoryBody />
-        </div>
+        <SidebarPanels idPrefix="sidebar" />
       </div>
 
       {/* Mobile Sheet */}
@@ -224,19 +315,15 @@ export default function ThreadHistory() {
         >
           <SheetContent
             side="left"
-            className="flex w-[280px] flex-col p-0"
+            className="flex w-[280px] flex-col gap-0 p-0"
           >
-            <SheetHeader className="border-border border-b px-6 py-4">
-              <SheetTitle className="text-[15px]">
-                Conversation history
-              </SheetTitle>
-            </SheetHeader>
-
-            <div className="flex flex-1 flex-col overflow-hidden py-3">
-              <ThreadHistoryBody
-                onThreadClick={() => setChatHistoryOpen(false)}
-              />
-            </div>
+            <SheetTitle className="sr-only">Sidebar</SheetTitle>
+            {/* Room on the right for the sheet's own close button. */}
+            <SidebarPanels
+              idPrefix="sidebar-sheet"
+              headClassName="pr-12"
+              onNavigate={() => setChatHistoryOpen(false)}
+            />
           </SheetContent>
         </Sheet>
       </div>
