@@ -366,13 +366,16 @@ const AssistantTurn = memo(function AssistantTurn({
   onFollowUpClick: (question: string) => void;
 }) {
   // Per-message follow-up chips, parsed from this answer's own content (works
-  // live and on reload). Suppressed while this message is the streaming tail.
+  // live and on reload). Suppressed while this message is the streaming tail,
+  // and on anything but an AI answer: a tool result can contain the heading too
+  // (a skill or saved conversation the agent read), and its bullets are not
+  // suggestions.
   const followUps = useMemo(
     () =>
-      isStreamingLast
+      isStreamingLast || message.type !== "ai"
         ? []
         : extractFollowUps(getContentString(message.content)),
-    [isStreamingLast, message.content],
+    [isStreamingLast, message.type, message.content],
   );
 
   return (
