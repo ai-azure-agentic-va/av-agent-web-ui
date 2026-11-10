@@ -99,6 +99,52 @@ describe("SkillView, writing a new skill", () => {
     expect(getUserSkills().map((s) => s.name)).toEqual(["Customer update"]);
   });
 
+  it("keeps instructions past the limit whole, says how far over they are, and saves once they fit", () => {
+    renderWithUrl(<SkillView onUse={vi.fn()} />, "?skill=new");
+    fill(NAME, "Customer update");
+    // A browser cuts a paste to a maxlength without a word.
+    expect(field(INSTRUCTIONS).hasAttribute("maxlength")).toBe(false);
+
+    fill(INSTRUCTIONS, "x".repeat(8_005));
+
+    expect(field(INSTRUCTIONS).value).toHaveLength(8_005);
+    expect(field(INSTRUCTIONS).getAttribute("aria-invalid")).toBe("true");
+    expect(
+      screen.getByText(
+        `5 characters over the ${(8_000).toLocaleString()} limit. Shorten the instructions to save the skill.`,
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        `${(8_005).toLocaleString()} / ${(8_000).toLocaleString()}`,
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save skill" }));
+    expect(getUserSkills()).toEqual([]);
+    expect(document.activeElement).toBe(field(INSTRUCTIONS));
+
+    fill(INSTRUCTIONS, "x".repeat(8_001));
+    expect(
+      screen.getByText(
+        `1 character over the ${(8_000).toLocaleString()} limit. Shorten the instructions to save the skill.`,
+      ),
+    ).toBeTruthy();
+
+    // Counted as saved: the space around the instructions is not.
+    fill(INSTRUCTIONS, `\n${"x".repeat(8_000)}\n`);
+    expect(field(INSTRUCTIONS).getAttribute("aria-invalid")).toBeNull();
+    expect(
+      screen.getByText(
+        `${(8_000).toLocaleString()} / ${(8_000).toLocaleString()}`,
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save skill" }));
+    expect(getUserSkills().map((s) => s.instructions)).toEqual([
+      "x".repeat(8_000),
+    ]);
+  });
+
   it("says so, and keeps the form, when the browser won't store it", () => {
     renderWithUrl(<SkillView onUse={vi.fn()} />, "?skill=new");
     fill(NAME, "Customer update");

@@ -258,7 +258,8 @@ function SkillEditor({
   const [name, setName] = useState(skill?.name ?? "");
   const [description, setDescription] = useState(skill?.description ?? "");
   const [instructions, setInstructions] = useState(skill?.instructions ?? "");
-  // Empty-field errors wait for the first save; a name clash shows at once.
+  // Empty-field errors wait for the first save; a name clash and instructions
+  // over the limit show at once.
   const [submitted, setSubmitted] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const instructionsRef = useRef<HTMLTextAreaElement>(null);
@@ -277,10 +278,17 @@ function SkillEditor({
     : submitted && !name.trim()
       ? "Give the skill a name."
       : null;
+  // The box takes any length, so a long paste arrives whole instead of being
+  // cut to fit; the skill saves once the instructions fit. Counted as saved,
+  // without the space around them.
+  const length = instructions.trim().length;
+  const over = length - SKILL_INSTRUCTIONS_MAX;
   const instructionsError =
     submitted && !instructions.trim()
       ? `Write the instructions ${APP_NAME} should follow.`
-      : null;
+      : over > 0
+        ? `${over.toLocaleString()} ${over === 1 ? "character" : "characters"} over the ${SKILL_INSTRUCTIONS_MAX.toLocaleString()} limit. Shorten the instructions to save the skill.`
+        : null;
 
   const save = (e?: FormEvent) => {
     e?.preventDefault();
@@ -289,7 +297,7 @@ function SkillEditor({
       nameRef.current?.focus();
       return;
     }
-    if (!instructions.trim()) {
+    if (!instructions.trim() || over > 0) {
       instructionsRef.current?.focus();
       return;
     }
@@ -377,8 +385,15 @@ function SkillEditor({
             "Sent with your message when you use the skill. Markdown works."
           }
           aside={
-            <span className="text-muted-foreground shrink-0 text-xs">
-              {instructions.length.toLocaleString()} /{" "}
+            <span
+              className={cn(
+                "shrink-0 text-xs",
+                over > 0
+                  ? "text-destructive font-medium"
+                  : "text-muted-foreground",
+              )}
+            >
+              {length.toLocaleString()} /{" "}
               {SKILL_INSTRUCTIONS_MAX.toLocaleString()}
             </span>
           }
@@ -388,7 +403,6 @@ function SkillEditor({
             id={ids.instructions}
             value={instructions}
             onChange={(e) => setInstructions(e.target.value)}
-            maxLength={SKILL_INSTRUCTIONS_MAX}
             placeholder={
               "For example:\n1. Open the ticket and its latest work notes.\n2. Say what has been done and what happens next, in plain words.\n3. End with when the customer will hear from us again."
             }

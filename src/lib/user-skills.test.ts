@@ -125,6 +125,30 @@ describe("the skills store", () => {
     expect(result.current).toEqual([]);
   });
 
+  it("refuses instructions over the limit rather than cutting them", async () => {
+    const { SKILL_INSTRUCTIONS_MAX, createSkill, updateSkill, useUserSkills } =
+      await load();
+    const fits = "x".repeat(SKILL_INSTRUCTIONS_MAX);
+    const { result } = renderHook(() => useUserSkills());
+
+    expect(() => createSkill({ ...draft, instructions: `${fits}y` })).toThrow(
+      RangeError,
+    );
+    expect(result.current).toEqual([]);
+
+    // Measured as saved, without the space around them.
+    let saved!: ReturnType<typeof createSkill>;
+    act(() => {
+      saved = createSkill({ ...draft, instructions: `\n ${fits} \n` });
+    });
+    expect(saved.instructions).toBe(fits);
+
+    expect(() =>
+      updateSkill(saved.id, { ...draft, instructions: `${fits}y` }),
+    ).toThrow(RangeError);
+    expect(result.current).toEqual([saved]);
+  });
+
   it("finds a clash on the same name or the same tag, but not with itself", async () => {
     const { createSkill, findNameClash } = await load();
     const saved = createSkill(draft);

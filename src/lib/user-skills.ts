@@ -143,11 +143,19 @@ export function findNameClash(
   );
 }
 
+// Instructions over the limit are refused, never cut: what was cut would
+// silently stop being part of the skill. The editor says so before saving.
 function clean(draft: UserSkillDraft): UserSkillDraft {
+  const instructions = draft.instructions.trim();
+  if (instructions.length > SKILL_INSTRUCTIONS_MAX) {
+    throw new RangeError(
+      `Skill instructions are limited to ${SKILL_INSTRUCTIONS_MAX} characters.`,
+    );
+  }
   return {
     name: draft.name.trim().slice(0, SKILL_NAME_MAX),
     description: draft.description.trim().slice(0, SKILL_DESCRIPTION_MAX),
-    instructions: draft.instructions.trim().slice(0, SKILL_INSTRUCTIONS_MAX),
+    instructions,
   };
 }
 
