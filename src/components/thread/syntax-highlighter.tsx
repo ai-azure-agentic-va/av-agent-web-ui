@@ -4,6 +4,15 @@ import python from "react-syntax-highlighter/dist/esm/languages/prism/python";
 import { coldarkDark } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { FC } from "react";
 
+// coldark's diff-deletion red sits on the --foreground code block; it is the
+// one token colour that needs a per-system value to hold 4.5:1 (see
+// --code-deleted). Inline styles accept var().
+const codeStyle = {
+  ...coldarkDark,
+  deleted: { ...coldarkDark.deleted, color: "var(--code-deleted)" },
+  important: { ...coldarkDark.important, color: "var(--code-deleted)" },
+};
+
 // Register languages you want to support
 SyntaxHighlighterPrism.registerLanguage("js", tsx);
 SyntaxHighlighterPrism.registerLanguage("jsx", tsx);
@@ -25,12 +34,12 @@ export const SyntaxHighlighter: FC<SyntaxHighlighterProps> = ({
   return (
     <SyntaxHighlighterPrism
       language={language}
-      style={coldarkDark}
+      style={codeStyle}
       customStyle={{
         margin: 0,
         width: "100%",
         background: "transparent",
-        padding: "1.5rem 1rem",
+        padding: "0.75rem 1rem",
       }}
       className={className}
     >

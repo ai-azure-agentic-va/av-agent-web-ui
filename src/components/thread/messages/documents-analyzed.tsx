@@ -80,7 +80,9 @@ export function DocumentsAnalyzed({
                   i === 0 ? "flex" : "hidden md:flex",
                 )}
               >
-                <span className="text-signal text-xs font-medium">{n}</span>
+                <span className="text-cite-on-ink text-xs font-medium">
+                  {n}
+                </span>
                 <span className="max-w-[15rem] truncate">
                   {docLabel(doc, n)}
                 </span>
@@ -122,7 +124,7 @@ export function DocumentsAnalyzed({
                 <span
                   className={cn(
                     "pt-0.5 text-right text-xs font-medium",
-                    isCited ? "text-signal" : "text-muted-foreground",
+                    isCited ? "text-cite" : "text-muted-foreground",
                   )}
                 >
                   {idx}
@@ -133,7 +135,7 @@ export function DocumentsAnalyzed({
                       href={doc.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-foreground decoration-signal/50 hover:decoration-signal focus-visible:ring-ring rounded-[2px] break-words underline decoration-1 underline-offset-4 transition-colors outline-none focus-visible:ring-2"
+                      className="text-foreground decoration-cite/50 hover:decoration-cite focus-visible:ring-ring rounded-[2px] break-words underline decoration-1 underline-offset-4 transition-colors outline-none focus-visible:ring-2"
                     >
                       {label}
                     </a>

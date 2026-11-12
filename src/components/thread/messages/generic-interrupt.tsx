@@ -31,7 +31,7 @@ function renderInterruptStateItem(value: any): React.ReactNode {
         href={value}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-foreground decoration-signal/60 hover:decoration-signal break-all underline underline-offset-4"
+        className="text-foreground decoration-cite/60 hover:decoration-cite break-all underline underline-offset-4"
       >
         {value}
       </a>

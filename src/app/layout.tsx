@@ -7,6 +7,7 @@ import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ThemeProvider } from "next-themes";
 import { AuthSessionProvider } from "@/components/auth/session-provider";
 import { APP_NAME, APP_TAGLINE } from "@/lib/app-config";
+import { BRAND, DESIGN_SYSTEM } from "@/lib/design-system";
 import { getClientConfig } from "@/lib/client-config";
 import { ClientConfigProvider } from "@/providers/ClientConfig";
 
@@ -50,6 +51,9 @@ const robotoMono = localFont({
 export const metadata: Metadata = {
   title: APP_NAME,
   description: APP_TAGLINE || APP_NAME,
+  // Per design system, so it lives in public/ rather than the app/icon.png
+  // file convention (which would override this for every build).
+  icons: { icon: [{ url: BRAND.icon, type: "image/png", sizes: "256x256" }] },
 };
 
 export default async function RootLayout({
@@ -65,6 +69,8 @@ export default async function RootLayout({
     <html
       lang="en"
       className="light"
+      // Selects this build's token block in src/styles/tokens/.
+      data-design-system={DESIGN_SYSTEM}
       style={{ colorScheme: "light" }}
       suppressHydrationWarning
     >

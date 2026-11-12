@@ -23,8 +23,8 @@ export const STARTER_TILE_COUNT = 4;
 const TRIGGER_ATTR = "data-prompt-library-trigger";
 const triggerProps = { [TRIGGER_ATTR]: "" };
 
-// The card never rides up under the 60px sticky header.
-const HEADER_CLEARANCE = 72;
+// The card never rides up under the 52px sticky header.
+const HEADER_CLEARANCE = 64;
 const MAX_CARD_HEIGHT = 520;
 const MIN_CARD_HEIGHT = 240;
 

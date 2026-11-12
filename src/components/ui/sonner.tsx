@@ -23,9 +23,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
       // richColors toasts follow the palette: the red tint with dark-red text.
       style={
         {
-          "--error-bg": "var(--signal-tint)",
-          "--error-border": "var(--signal)",
-          "--error-text": "var(--signal-ink)",
+          "--error-bg": "var(--destructive-tint)",
+          "--error-border": "var(--destructive)",
+          "--error-text": "var(--destructive-ink)",
         } as CSSProperties
       }
       {...props}

@@ -141,7 +141,7 @@ export function ToolStepSummary({ tool }: { tool: StepTool }) {
         <p
           className={cn(
             "flex min-w-0 items-start gap-1.5",
-            failed ? "text-signal-ink" : "text-muted-foreground",
+            failed ? "text-destructive-ink" : "text-muted-foreground",
           )}
         >
           <CornerDownRight

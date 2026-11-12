@@ -43,14 +43,14 @@ function Card({
   );
 }
 
-// 44px head under a hairline rule. The right padding leaves a trailing 32px
-// icon button 6px from the edge, the same inset as above and below it.
+// 40px head under a hairline rule. The right padding leaves a trailing 32px
+// icon button 4px from the edge, the same inset as above and below it.
 function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-header"
       className={cn(
-        "border-border flex min-h-11 items-center gap-3 border-b py-1.5 pr-1.5 pl-4",
+        "border-border flex min-h-10 items-center gap-3 border-b py-1 pr-1 pl-4",
         className,
       )}
       {...props}
@@ -67,7 +67,7 @@ function CardTitle({
     <Comp
       data-slot="card-title"
       className={cn(
-        "text-foreground text-[15px] leading-6 font-semibold",
+        "text-foreground text-sm leading-5 font-semibold",
         className,
       )}
       {...props}
@@ -79,7 +79,7 @@ function CardBody({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-body"
-      className={cn("p-4", className)}
+      className={cn("px-4 py-3", className)}
       {...props}
     />
   );
@@ -90,7 +90,7 @@ function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card-footer"
       className={cn(
-        "border-border flex items-center gap-2 border-t px-4 py-3",
+        "border-border flex items-center gap-2 border-t px-4 py-2.5",
         className,
       )}
       {...props}

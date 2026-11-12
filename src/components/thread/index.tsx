@@ -43,7 +43,7 @@ import {
 import { MultimodalPreview } from "./MultimodalPreview";
 import { HeaderAccount } from "./header-account";
 import { useFileUpload, type FileUpload } from "@/hooks/useFileUpload";
-import { SUPPORTED_FILE_TYPES } from "@/lib/multimodal-utils";
+import { ACCEPTED_FILE_EXTENSIONS } from "@/lib/multimodal-utils";
 import { SessionBoundaryNudge } from "./session-nudge";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
@@ -68,6 +68,7 @@ import {
   type StarterPrompt,
 } from "./prompt-library";
 import {
+  MAX_SKILLS_PER_MESSAGE,
   type UserSkill,
   buildMessageContent,
   useUserSkills,
@@ -142,9 +143,9 @@ type ChatInputProps = {
   libraryOpen: boolean;
   onLibraryOpenChange: (open: boolean) => void;
   onPickPrompt: (message: string) => void;
-  skill: UserSkill | null;
+  skills: readonly UserSkill[];
   onPickSkill: (id: string) => void;
-  onRemoveSkill: () => void;
+  onRemoveSkill: (id: string) => void;
 };
 
 function ChatInput({
@@ -160,7 +161,7 @@ function ChatInput({
   libraryOpen,
   onLibraryOpenChange,
   onPickPrompt,
-  skill,
+  skills,
   onPickSkill,
   onRemoveSkill,
 }: ChatInputProps) {
@@ -172,10 +173,11 @@ function ChatInput({
     value: input,
     setValue: setInput,
     textareaRef,
+    attached: skills.map((s) => s.id),
     onPick: (s) => onPickSkill(s.id),
   });
   const hasPrompts = prompts.length > 0;
-  const showFooter =
+  const showTools =
     clientConfig.enableFileUpload || hasPrompts || mention.hasSkills;
   return (
     // The library card is the composer's sibling, not its child, so focus in
@@ -214,14 +216,15 @@ function ChatInput({
           onSubmit={handleSubmit}
           className="flex flex-col"
         >
-          {(skill || upload.contentBlocks.length > 0) && (
-            <div className="flex flex-wrap items-start gap-2 px-3 pt-3">
-              {skill && (
+          {(skills.length > 0 || upload.contentBlocks.length > 0) && (
+            <div className="flex flex-wrap items-start gap-2 px-2 pt-2">
+              {skills.map((skill) => (
                 <SkillChip
+                  key={skill.id}
                   skill={skill}
-                  onRemove={onRemoveSkill}
+                  onRemove={() => onRemoveSkill(skill.id)}
                 />
-              )}
+              ))}
               {upload.contentBlocks.map((block, idx) => (
                 <MultimodalPreview
                   key={idx}
@@ -233,7 +236,52 @@ function ChatInput({
               ))}
             </div>
           )}
-          <div className="flex items-end gap-2 p-3">
+          {/* The message takes the full width and starts at the left edge,
+              lined up with the first tool's glyph; the tools and send sit on
+              one row beneath it. The row is always there, so prompts or skills
+              arriving after load never change the composer's height. */}
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center p-2 [grid-template-areas:'text_text'_'tools_send']">
+            {showTools && (
+              <div className="flex items-center gap-0.5 [grid-area:tools]">
+                {/* Gated by ENABLE_FILE_UPLOAD; paste / drop are gated in the hook. */}
+                {clientConfig.enableFileUpload && (
+                  <>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept={ACCEPTED_FILE_EXTENSIONS.join(",")}
+                      multiple
+                      hidden
+                      onChange={upload.handleFileInput}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      aria-label="Attach Markdown files"
+                      title="Attach Markdown (.md) files"
+                      className="text-foreground hover:bg-accent focus-visible:ring-ring flex h-8 w-8 items-center justify-center rounded-md transition-colors outline-none focus-visible:ring-2"
+                    >
+                      <Paperclip className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
+                {hasPrompts && (
+                  <PromptLibraryButton
+                    open={libraryOpen}
+                    onOpenChange={onLibraryOpenChange}
+                    controlsId={libraryId}
+                  />
+                )}
+                {mention.hasSkills && (
+                  <SkillPickerButton
+                    onClick={mention.start}
+                    disabledReason={
+                      mention.canAdd ? undefined : mention.unavailableReason
+                    }
+                  />
+                )}
+              </div>
+            )}
             <textarea
               ref={textareaRef}
               value={input}
@@ -259,9 +307,9 @@ function ChatInput({
               aria-label="Message"
               rows={1}
               // 16px below sm: iOS Safari zooms the page into any smaller field.
-              className="placeholder:text-muted-foreground field-sizing-content max-h-[200px] min-h-[44px] flex-1 resize-none scrollbar-thin border-0 bg-transparent px-2 py-2.5 text-base leading-6 focus:ring-0 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+              className="placeholder:text-muted-foreground field-sizing-content max-h-[200px] min-h-9 resize-none scrollbar-thin border-0 bg-transparent px-2 pt-1.5 pb-1.5 text-base leading-6 [grid-area:text] focus:ring-0 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 sm:text-[15px]"
             />
-            <div className="flex items-center gap-1 pb-0.5">
+            <div className="flex items-center justify-self-end [grid-area:send]">
               {stream.isLoading ? (
                 // The live strap already says the agent is working; this is just
                 // the way to stop it.
@@ -275,13 +323,13 @@ function ChatInput({
                   title="Stop generating"
                   className={cn(
                     "flex h-10 w-10 items-center justify-center rounded-md",
-                    "bg-primary transition-colors outline-none",
+                    "group bg-primary transition-colors outline-none",
                     "hover:bg-signal focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2",
                   )}
                 >
                   <span
                     aria-hidden="true"
-                    className="bg-primary-foreground size-3 rounded-[2px]"
+                    className="bg-primary-foreground group-hover:bg-signal-foreground size-3 rounded-[2px] transition-colors"
                   />
                 </button>
               ) : (
@@ -293,7 +341,7 @@ function ChatInput({
                   className={cn(
                     "flex h-10 w-10 items-center justify-center rounded-md",
                     "bg-signal text-signal-foreground transition-colors outline-none",
-                    "hover:bg-signal-ink",
+                    "hover:bg-signal-strong",
                     "focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2",
                     "disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed",
                   )}
@@ -303,44 +351,6 @@ function ChatInput({
               )}
             </div>
           </div>
-          {showFooter && (
-            <div className="border-border flex min-h-11 items-center justify-between gap-2 border-t px-2 py-1.5">
-              <div className="flex items-center gap-0.5">
-                {/* Gated by ENABLE_FILE_UPLOAD; paste / drop are gated in the hook. */}
-                {clientConfig.enableFileUpload && (
-                  <>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept={SUPPORTED_FILE_TYPES.join(",")}
-                      multiple
-                      hidden
-                      onChange={upload.handleFileInput}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      aria-label="Attach files"
-                      title="Attach images or PDFs"
-                      className="text-foreground hover:bg-accent focus-visible:ring-ring flex h-8 w-8 items-center justify-center rounded-md transition-colors outline-none focus-visible:ring-2"
-                    >
-                      <Paperclip className="h-4 w-4" />
-                    </button>
-                  </>
-                )}
-                {hasPrompts && (
-                  <PromptLibraryButton
-                    open={libraryOpen}
-                    onOpenChange={onLibraryOpenChange}
-                    controlsId={libraryId}
-                  />
-                )}
-                {mention.hasSkills && (
-                  <SkillPickerButton onClick={mention.start} />
-                )}
-              </div>
-            </div>
-          )}
         </form>
       </div>
     </div>
@@ -386,7 +396,9 @@ const AssistantTurn = memo(function AssistantTurn({
         handleRegenerate={handleRegenerate}
       />
       {followUps.length > 0 && (
-        <div className={cn("flex flex-col gap-3 pb-2", TURN_GUTTER)}>
+        // The pills belong to the answer above: 12px under its toolbar, not
+        // the 24px that separates messages.
+        <div className={cn("-mt-3 flex flex-col gap-2 pb-1", TURN_GUTTER)}>
           <p className="text-muted-foreground text-[13px] font-medium">
             Want to explore further?
           </p>
@@ -396,12 +408,12 @@ const AssistantTurn = memo(function AssistantTurn({
                 key={i}
                 type="button"
                 onClick={() => onFollowUpClick(q)}
-                className="group/fu border-foreground hover:bg-foreground hover:text-background focus-visible:ring-ring inline-flex items-center gap-2 rounded-full border px-4 py-2 text-left text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                className="group/fu border-foreground hover:bg-foreground hover:text-background focus-visible:ring-ring inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-left text-[13px] leading-5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
               >
                 {q}
                 <ArrowRight
                   aria-hidden="true"
-                  className="size-3.5 shrink-0 transition-transform group-hover/fu:translate-x-0.5"
+                  className="size-3 shrink-0 transition-transform group-hover/fu:translate-x-0.5"
                 />
               </button>
             ))}
@@ -453,15 +465,32 @@ export function Thread() {
   const contentBlocksRef = useRef(upload.contentBlocks);
   contentBlocksRef.current = upload.contentBlocks;
 
-  // The skill waiting in the composer for the next typed message. Held by id
-  // so an edit to the skill is picked up, and a deleted one simply drops off.
+  // The skills waiting in the composer for the next typed message, in the
+  // order they were added. Held by id so an edit to a skill is picked up, and
+  // a deleted one simply drops off.
   const skills = useUserSkills();
-  const [attachedSkillId, setAttachedSkillId] = useState<string | null>(null);
-  const attachedSkill = attachedSkillId
-    ? (skills.find((s) => s.id === attachedSkillId) ?? null)
-    : null;
-  const attachedSkillRef = useRef(attachedSkill);
-  attachedSkillRef.current = attachedSkill;
+  const [attachedSkillIds, setAttachedSkillIds] = useState<string[]>([]);
+  const attachedSkills = useMemo(
+    () =>
+      attachedSkillIds.flatMap((id) => skills.find((s) => s.id === id) ?? []),
+    [attachedSkillIds, skills],
+  );
+  const attachedSkillsRef = useRef(attachedSkills);
+  attachedSkillsRef.current = attachedSkills;
+
+  // Adds a skill to the composer; false when the message is already full.
+  // Counts only skills that still exist, so a deleted one frees its place.
+  const addSkill = useCallback((id: string): boolean => {
+    const current = attachedSkillsRef.current;
+    if (current.some((s) => s.id === id)) return true;
+    if (current.length >= MAX_SKILLS_PER_MESSAGE) return false;
+    setAttachedSkillIds([...current.map((s) => s.id), id]);
+    return true;
+  }, []);
+  const removeSkill = useCallback(
+    (id: string) => setAttachedSkillIds((ids) => ids.filter((i) => i !== id)),
+    [],
+  );
 
   const lastError = useRef<string | undefined>(undefined);
 
@@ -532,15 +561,15 @@ export function Thread() {
         overrideText === undefined ? contentBlocksRef.current : [];
       if ((text.length === 0 && attachments.length === 0) || stream.isLoading)
         return;
-      // So does an attached skill: it travels as its own text block after the
+      // So do attached skills: each travels as its own text block after the
       // person's words, which the UI leaves out wherever it shows their text.
-      const skill =
-        overrideText === undefined ? attachedSkillRef.current : null;
+      const skills =
+        overrideText === undefined ? attachedSkillsRef.current : [];
 
       const newHumanMessage: Message = {
         id: uuidv4(),
         type: "human",
-        content: buildMessageContent(text, skill, attachments),
+        content: buildMessageContent(text, skills, attachments),
       };
 
       const toolMessages = ensureToolCallsHaveResponses(stream.messages);
@@ -570,7 +599,7 @@ export function Thread() {
       if (overrideText === undefined) {
         setInput("");
         resetBlocks();
-        setAttachedSkillId(null);
+        setAttachedSkillIds([]);
       }
     },
     [resetBlocks],
@@ -611,14 +640,20 @@ export function Thread() {
   }, []);
 
   // "Use in chat" on a skill: back to the conversation the person was in,
-  // with the skill on the composer, waiting for them to type.
+  // with the skill added to the composer, waiting for them to type.
   const handleUseSkill = useCallback(
     (id: string) => {
-      setAttachedSkillId(id);
+      if (!addSkill(id)) {
+        toast.error(
+          `You can use up to ${MAX_SKILLS_PER_MESSAGE} skills in one message`,
+          { description: "Remove one from the message box to add this one." },
+        );
+        return;
+      }
       void setOpenSkill(null);
       requestAnimationFrame(() => chatInputRef.current?.focus());
     },
-    [setOpenSkill],
+    [addSkill, setOpenSkill],
   );
 
   // Clicking a follow-up suggestion sends it immediately as a new turn,
@@ -707,7 +742,7 @@ export function Thread() {
             }
           >
             {/* Header */}
-            <header className="border-border bg-background sticky top-0 z-10 flex h-15 items-center justify-between gap-3 border-b px-3 sm:px-5">
+            <header className="border-border bg-background sticky top-0 z-10 flex h-13 items-center justify-between gap-3 border-b px-3 sm:px-5">
               <div className="flex min-w-0 items-center gap-1 sm:gap-2">
                 <TooltipProvider>
                   <Tooltip>
@@ -788,27 +823,27 @@ export function Thread() {
                 contentClassName={cn(
                   // min-w-0: as a grid item this column would otherwise grow to
                   // its widest table or code line and push past a phone screen.
-                  "w-full min-w-0 max-w-[780px] mx-auto flex flex-col gap-6",
-                  !chatStarted && "my-auto py-8 sm:py-12",
-                  chatStarted && "pt-10 pb-24",
+                  "w-full min-w-0 max-w-[880px] mx-auto flex flex-col gap-6",
+                  !chatStarted && "my-auto py-6 sm:py-10",
+                  chatStarted && "pt-6 pb-12",
                 )}
                 content={
                   <>
                     {!chatStarted && (
-                      <div className="flex w-full flex-col gap-8">
+                      <div className="flex w-full flex-col gap-6">
                         {/* The front page: the product's name as the headline and
                           its promise beneath in small type, set flush left like
                           the questions it invites. */}
-                        <div className="flex flex-col items-start gap-3">
+                        <div className="flex flex-col items-start gap-2.5">
                           <AppLogo
-                            width={40}
-                            height={40}
+                            width={32}
+                            height={32}
                           />
-                          <div className="flex flex-col gap-2">
-                            <h1 className="text-foreground max-w-[24ch] text-[32px] leading-[1.15] font-semibold tracking-[-0.025em] text-balance sm:text-[40px]">
+                          <div className="flex flex-col gap-1.5">
+                            <h1 className="text-foreground max-w-[24ch] text-[28px] leading-[1.15] font-semibold tracking-[-0.025em] text-balance sm:text-[32px]">
                               {APP_NAME}
                             </h1>
-                            <p className="text-muted-foreground max-w-[52ch] text-[15px] leading-6 font-normal text-pretty">
+                            <p className="text-muted-foreground max-w-[52ch] text-sm leading-[22px] font-normal text-pretty">
                               {APP_TAGLINE}
                             </p>
                           </div>
@@ -829,33 +864,33 @@ export function Thread() {
                             libraryOpen={libraryOpen}
                             onLibraryOpenChange={setLibraryOpen}
                             onPickPrompt={handlePickPrompt}
-                            skill={attachedSkill}
-                            onPickSkill={setAttachedSkillId}
-                            onRemoveSkill={() => setAttachedSkillId(null)}
+                            skills={attachedSkills}
+                            onPickSkill={addSkill}
+                            onRemoveSkill={removeSkill}
                           />
                         </div>
 
                         {/* Starter Prompts */}
                         {starterPromptsLoading ? (
                           <div
-                            className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2"
+                            className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2"
                             role="status"
                             aria-label="Loading suggestions"
                           >
                             {Array.from({ length: 4 }).map((_, i) => (
                               <div
                                 key={i}
-                                className={cn(cardVariants(), "p-4")}
+                                className={cn(cardVariants(), "px-3.5 py-3")}
                               >
                                 <Skeleton className="h-4 w-2/3" />
-                                <Skeleton className="mt-2.5 h-3 w-full" />
+                                <Skeleton className="mt-2 h-3 w-full" />
                               </div>
                             ))}
                           </div>
                         ) : (
                           starterPrompts.length > 0 && (
-                            <div className="flex w-full flex-col gap-5">
-                              <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+                            <div className="flex w-full flex-col gap-4">
+                              <div className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2">
                                 {starterPrompts
                                   .slice(0, STARTER_TILE_COUNT)
                                   .map((prompt, i) => (
@@ -868,22 +903,22 @@ export function Thread() {
                                       disabled={isLoading}
                                       className={cn(
                                         cardVariants({ interactive: true }),
-                                        "group/sp flex items-start justify-between gap-4 p-4 text-left disabled:pointer-events-none disabled:opacity-50",
+                                        "group/sp flex items-start justify-between gap-3 px-3.5 py-3 text-left disabled:pointer-events-none disabled:opacity-50",
                                       )}
                                     >
                                       <span className="min-w-0">
-                                        <span className="text-foreground block text-[15px] font-medium">
+                                        <span className="text-foreground block text-sm leading-5 font-medium">
                                           {prompt.label || prompt.message}
                                         </span>
                                         {prompt.label && (
-                                          <span className="text-muted-foreground mt-1 line-clamp-2 block text-sm font-light">
+                                          <span className="text-muted-foreground mt-0.5 line-clamp-2 block text-[13px] leading-5">
                                             {prompt.message}
                                           </span>
                                         )}
                                       </span>
                                       <ArrowRight
                                         aria-hidden="true"
-                                        className="mt-0.5 size-4 shrink-0 transition-transform group-hover/sp:translate-x-0.5"
+                                        className="mt-[3px] size-3.5 shrink-0 transition-transform group-hover/sp:translate-x-0.5"
                                       />
                                     </button>
                                   ))}
@@ -982,11 +1017,11 @@ export function Thread() {
               // instead of ending on a hard rule.
               <div
                 className={cn(
-                  "bg-background relative px-4 pt-2 pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-gradient-to-t before:from-white before:to-transparent",
+                  "bg-background before:from-background relative px-4 pt-1.5 pb-3 before:pointer-events-none before:absolute before:inset-x-0 before:-top-8 before:h-8 before:bg-gradient-to-t before:to-transparent",
                   openSkill && "hidden",
                 )}
               >
-                <div className="mx-auto max-w-[780px]">
+                <div className="mx-auto max-w-[880px]">
                   <SessionBoundaryNudge
                     messages={messages}
                     threadId={threadId}
@@ -1005,9 +1040,9 @@ export function Thread() {
                     libraryOpen={libraryOpen}
                     onLibraryOpenChange={setLibraryOpen}
                     onPickPrompt={handlePickPrompt}
-                    skill={attachedSkill}
-                    onPickSkill={setAttachedSkillId}
-                    onRemoveSkill={() => setAttachedSkillId(null)}
+                    skills={attachedSkills}
+                    onPickSkill={addSkill}
+                    onRemoveSkill={removeSkill}
                   />
                 </div>
               </div>
@@ -1016,7 +1051,7 @@ export function Thread() {
             {/* Debug Panel */}
             {debugOpen && (
               <div className="border-border bg-muted border-t px-4 py-3 text-xs">
-                <div className="mx-auto max-w-[780px] space-y-3">
+                <div className="mx-auto max-w-[880px] space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-foreground font-semibold">
                       Debug Panel

@@ -9,12 +9,12 @@ import {
 } from "react";
 import { toast } from "sonner";
 import {
-  AttachmentBlock,
   MAX_ATTACHMENTS,
   MAX_TOTAL_BYTES,
   attachmentBytes,
   fileToContentBlock,
   formatBytes,
+  type MarkdownAttachmentBlock,
   validateAttachment,
 } from "@/lib/multimodal-utils";
 
@@ -23,22 +23,24 @@ function hasFiles(e: DragEvent | globalThis.DragEvent): boolean {
 }
 
 /**
- * Staged composer attachments (images / PDFs) as backend-ready content blocks,
- * fed by the file picker, clipboard paste, and drag-and-drop. With
+ * Staged composer attachments (Markdown files) as backend-ready content
+ * blocks, fed by the file picker, clipboard paste, and drag-and-drop. With
  * `enabled: false`, paste and drop fall through to their default behaviour.
  */
 export function useFileUpload({ enabled = true }: { enabled?: boolean } = {}) {
-  const [contentBlocks, setContentBlocks] = useState<AttachmentBlock[]>([]);
+  const [contentBlocks, setContentBlocks] = useState<MarkdownAttachmentBlock[]>(
+    [],
+  );
   const [dragOver, setDragOver] = useState(false);
   // Limit checks must see every earlier pick, including files still being read
   // and blocks whose state update hasn't re-rendered yet — otherwise two quick
   // adds both pass against the same stale total. So the staged list is mirrored
   // synchronously (all writes go through commit) and in-flight reads are
   // reserved in pendingRef until they land.
-  const blocksRef = useRef<AttachmentBlock[]>([]);
+  const blocksRef = useRef<MarkdownAttachmentBlock[]>([]);
   const pendingRef = useRef({ count: 0, bytes: 0 });
 
-  const commit = useCallback((next: AttachmentBlock[]) => {
+  const commit = useCallback((next: MarkdownAttachmentBlock[]) => {
     blocksRef.current = next;
     setContentBlocks(next);
   }, []);

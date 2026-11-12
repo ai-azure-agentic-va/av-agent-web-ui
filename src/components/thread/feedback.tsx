@@ -121,7 +121,7 @@ export function MessageFeedback({ runId }: FeedbackProps) {
             tooltip="Bad response"
             onClick={handleDown}
             disabled={isSubmitting}
-            className="text-muted-foreground hover:text-signal"
+            className="text-muted-foreground hover:text-signal-text"
           >
             <ThumbsDown />
           </TooltipIconButton>

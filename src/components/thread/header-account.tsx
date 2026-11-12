@@ -16,7 +16,7 @@ export function HeaderAccount({ ssoEnabled }: { ssoEnabled: boolean }) {
       {ssoEnabled && (
         <Button
           variant="ghost"
-          className="text-foreground hover:text-signal h-10 gap-2 px-2.5 text-sm font-normal sm:px-3"
+          className="text-foreground hover:text-signal-text h-10 gap-2 px-2.5 text-sm font-normal sm:px-3"
           title="Log out"
           data-testid="logout-button"
           onClick={() => {

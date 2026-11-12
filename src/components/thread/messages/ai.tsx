@@ -295,7 +295,7 @@ export function AssistantMessage({
               <span className="sr-only">{APP_NAME}:</span>
               <AgentMark
                 responding={showLiveThought}
-                className="absolute top-px -left-10"
+                className="absolute -top-0.5 -left-10"
               />
               {/* Render markdown live as tokens stream in, instead of showing
                   plain text and only formatting once the stream completes. */}

@@ -7,8 +7,8 @@ import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
-import { isBase64ContentBlock } from "@/lib/multimodal-utils";
-import { getMessageSkillName, isSkillBlock } from "@/lib/user-skills";
+import { isAttachmentBlock } from "@/lib/multimodal-utils";
+import { getMessageSkillNames, isSkillBlock } from "@/lib/user-skills";
 import { HumanMark } from "../speaker";
 import { TURN_GUTTER } from "../turn-chain";
 
@@ -61,18 +61,18 @@ export function HumanMessage({
   const [isEditing, setIsEditing] = useState(false);
   const [value, setValue] = useState("");
   const contentString = getContentString(message.content);
-  const skillName = getMessageSkillName(message.content);
+  const skillNames = getMessageSkillNames(message.content);
   const isHeadline =
     contentString.length <= HEADLINE_MAX_CHARS && !contentString.includes("\n");
 
   const handleSubmitEdit = () => {
     setIsEditing(false);
 
-    // Editing only rewrites the text; carry the original skill and
+    // Editing only rewrites the text; carry the original skills and
     // attachments over so the re-run still sees them.
     const carried = Array.isArray(message.content)
       ? message.content.filter(
-          (block) => isSkillBlock(block) || isBase64ContentBlock(block),
+          (block) => isSkillBlock(block) || isAttachmentBlock(block),
         )
       : [];
     const newMessage: Message = {
@@ -150,17 +150,17 @@ export function HumanMessage({
       className={cn(
         // Each question opens a new turn: a hairline and air above it, except
         // for the first one in the thread.
-        "message-animate group not-first:border-border flex w-full flex-col gap-2 not-first:mt-4 not-first:border-t not-first:pt-10",
+        "message-animate group not-first:border-border flex w-full flex-col gap-2 not-first:mt-2 not-first:border-t not-first:pt-8",
       )}
     >
       <div className={cn("relative flex flex-col gap-2", TURN_GUTTER)}>
         {/* The person's mark opens the turn; the rail leaves it for the
             answer, through the 24px gap between messages. */}
-        <HumanMark className="absolute top-px left-0" />
+        <HumanMark className="absolute -top-px left-0" />
         {hasReply && (
           <span
             aria-hidden="true"
-            className="bg-rail absolute top-[33px] -bottom-6 left-[13px] w-0.5"
+            className="bg-rail absolute top-[31px] -bottom-6 left-[13px] w-0.5"
           />
         )}
         {isEditing ? (
@@ -174,13 +174,13 @@ export function HumanMessage({
           </>
         ) : (
           <div className="relative flex flex-col gap-3 sm:pr-28">
-            {/* Render images and files */}
+            {/* Render attached files */}
             {Array.isArray(message.content) &&
-              message.content.some(isBase64ContentBlock) && (
+              message.content.some(isAttachmentBlock) && (
                 <div className="flex flex-wrap items-end gap-2">
                   {message.content.reduce<React.ReactNode[]>(
                     (acc, block, idx) => {
-                      if (isBase64ContentBlock(block)) {
+                      if (isAttachmentBlock(block)) {
                         acc.push(
                           <MultimodalPreview
                             key={idx}
@@ -202,21 +202,27 @@ export function HumanMessage({
                 className={cn(
                   "max-w-[62ch] break-words whitespace-pre-wrap",
                   isHeadline
-                    ? "text-[22px] leading-[30px] font-semibold tracking-[-0.015em] text-balance"
-                    : "text-[17px] leading-7 font-medium",
+                    ? "text-lg leading-[26px] font-semibold tracking-[-0.01em] text-balance"
+                    : "text-[15px] leading-6 font-medium",
                 )}
               >
                 <span className="sr-only">You: </span>
                 {contentString}
               </p>
             )}
-            {skillName && (
+            {skillNames.length > 0 && (
               <p className="text-muted-foreground flex items-center gap-1.5 text-[13px] font-medium">
                 <ScrollText
                   aria-hidden="true"
                   className="size-3.5 shrink-0"
                 />
-                <span className="min-w-0 truncate">Skill · {skillName}</span>
+                <span
+                  className="min-w-0 truncate"
+                  title={skillNames.join(", ")}
+                >
+                  {skillNames.length === 1 ? "Skill" : "Skills"} ·{" "}
+                  {skillNames.join(", ")}
+                </span>
               </p>
             )}
             {actions}

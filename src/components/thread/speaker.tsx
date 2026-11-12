@@ -5,7 +5,7 @@ import { useSessionUser } from "@/providers/SessionUser";
 import { AppLogo } from "../icons/app-logo";
 
 // Speaker marks sit in the turn's left gutter: the person's initials open a
-// turn at the question, the IVY mark closes it at the answer. Both are 28px
+// turn at the question, the build's mark (AppLogo) closes it at the answer. Both are 28px
 // so the chain's rail runs through their centres.
 const MARK = "flex size-7 shrink-0 items-center justify-center";
 
@@ -27,9 +27,9 @@ export function HumanMark({ className }: { className?: string }) {
 }
 
 /**
- * The IVY mark (public/logo.png, a three-leaf plant with a circuit cut out of
- * it). It pulses while the agent is writing the answer, the one live element on
- * screen at that moment.
+ * The agent's mark, the IVY leaf (src/lib/design-system.ts). It pulses while
+ * the agent is writing the answer, the one live element on screen at that
+ * moment.
  */
 export function AgentMark({
   responding = false,

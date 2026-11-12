@@ -7,7 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { UserSkill } from "@/lib/user-skills";
+import { MAX_SKILLS_PER_MESSAGE, type UserSkill } from "@/lib/user-skills";
 import { clearSkills, seedSkills } from "../../../../test/skills";
 import {
   SkillChip,
@@ -26,14 +26,15 @@ function Composer({
   onSubmit?: () => void;
 }) {
   const [value, setValue] = useState("");
-  const [skill, setSkill] = useState<UserSkill | null>(null);
+  const [skills, setSkills] = useState<UserSkill[]>([]);
   const ref = useRef<HTMLTextAreaElement>(null);
   const mention = useSkillMention({
     value,
     setValue,
     textareaRef: ref,
+    attached: skills.map((s) => s.id),
     onPick: (s) => {
-      setSkill(s);
+      setSkills((prev) => [...prev, s]);
       onPick(s);
     },
   });
@@ -41,12 +42,15 @@ function Composer({
     <div>
       <SkillPicker mention={mention} />
       <span role="status">{mention.status}</span>
-      {skill && (
+      {skills.map((skill) => (
         <SkillChip
+          key={skill.id}
           skill={skill}
-          onRemove={() => setSkill(null)}
+          onRemove={() =>
+            setSkills((prev) => prev.filter((s) => s.id !== skill.id))
+          }
         />
-      )}
+      ))}
       <textarea
         ref={ref}
         aria-label="Message"
@@ -58,7 +62,14 @@ function Composer({
           if (e.key === "Enter" && !e.shiftKey) onSubmit();
         }}
       />
-      {mention.hasSkills && <SkillPickerButton onClick={mention.start} />}
+      {mention.hasSkills && (
+        <SkillPickerButton
+          onClick={mention.start}
+          disabledReason={
+            mention.canAdd ? undefined : mention.unavailableReason
+          }
+        />
+      )}
     </div>
   );
 }
@@ -259,5 +270,71 @@ describe("typing @ in the composer", () => {
     expect(
       screen.queryByRole("button", { name: "Remove skill Customer update" }),
     ).toBeNull();
+  });
+
+  it("adds a second skill next to the first, and stops listing the first", () => {
+    seedSkills({ name: "Customer update" }, { name: "Incident triage" });
+    const onPick = vi.fn();
+    render(<Composer onPick={onPick} />);
+    type("Write up @cus");
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+
+    type("Write up @");
+    expect(optionNames()).toEqual(["Incident triage"]);
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+
+    expect(onPick.mock.calls.map(([s]) => s.name)).toEqual([
+      "Customer update",
+      "Incident triage",
+    ]);
+    expect(
+      screen.getByRole("button", { name: "Remove skill Customer update" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Remove skill Incident triage" }),
+    ).toBeTruthy();
+    // Every skill is on the message, so there is nothing left to offer.
+    type("Write up @");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Use a skill" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
+  it(`stops at ${MAX_SKILLS_PER_MESSAGE} skills and says why`, () => {
+    seedSkills(
+      ...Array.from({ length: MAX_SKILLS_PER_MESSAGE + 1 }, (_, i) => ({
+        name: `Skill ${i + 1}`,
+      })),
+    );
+    render(<Composer />);
+    for (let i = 0; i < MAX_SKILLS_PER_MESSAGE; i += 1) {
+      type("@");
+      fireEvent.keyDown(textarea(), { key: "Enter" });
+    }
+    expect(
+      screen.getAllByRole("button", { name: /^Remove skill/ }),
+    ).toHaveLength(MAX_SKILLS_PER_MESSAGE);
+
+    type("@");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.getByRole("status").textContent).toMatch(
+      `up to ${MAX_SKILLS_PER_MESSAGE} skills`,
+    );
+    const button = screen.getByRole("button", {
+      name: "Use a skill",
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toMatch(`Up to ${MAX_SKILLS_PER_MESSAGE} skills`);
+
+    // Escape puts the note away; taking a skill off brings the list back.
+    fireEvent.keyDown(textarea(), { key: "Escape" });
+    expect(screen.getByRole("status").textContent).toBe("");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove skill Skill 1" }),
+    );
+    type("Next @");
+    expect(optionNames()).toEqual(["Skill 1", "Skill 6"]);
   });
 });

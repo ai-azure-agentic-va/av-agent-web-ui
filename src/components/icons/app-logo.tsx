@@ -1,5 +1,8 @@
 import { cn } from "@/lib/utils";
+import { BRAND } from "@/lib/design-system";
 
+// The build's mark, the IVY leaf (src/lib/design-system.ts). Square and
+// transparent, so every placement sizes it the same way.
 interface AppLogoProps {
   className?: string;
   width?: number;
@@ -16,7 +19,7 @@ export function AppLogo({
 }: AppLogoProps) {
   return (
     <img
-      src="/logo.png"
+      src={BRAND.mark}
       alt={alt}
       width={width}
       height={height}

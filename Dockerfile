@@ -4,14 +4,14 @@
 # =============================================================================
 
 # ---- Stage 1: install dependencies ------------------------------------------
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 # Copy package manager files
 COPY package.json pnpm-lock.yaml* ./
 
-# Enable corepack (ships with Node 20) and install.
+# Enable corepack (ships with Node 24; Node 25+ no longer bundles it) and install.
 # --frozen-lockfile makes the image install EXACTLY what pnpm-lock.yaml pins and
 # fails the build if package.json and the lockfile disagree — so a rebuild can
 # never silently float dependencies within caret ranges. If you change deps, run
@@ -19,7 +19,7 @@ COPY package.json pnpm-lock.yaml* ./
 RUN corepack enable pnpm && pnpm install --frozen-lockfile
 
 # ---- Stage 2: build ---------------------------------------------------------
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -34,15 +34,19 @@ ARG NEXT_PUBLIC_API_URL=/api
 ARG NEXT_PUBLIC_ASSISTANT_ID=chat
 ARG NEXT_PUBLIC_APP_NAME="IVY"
 ARG NEXT_PUBLIC_APP_TAGLINE="An incident virtual assistant which answers from tickets, pipelines and docs."
+# Design system (colour tokens + mark): ps, the default. Baked in at build;
+# an unknown value fails the build.
+ARG NEXT_PUBLIC_DESIGN_SYSTEM=ps
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_PUBLIC_ASSISTANT_ID=${NEXT_PUBLIC_ASSISTANT_ID}
 ENV NEXT_PUBLIC_APP_NAME=${NEXT_PUBLIC_APP_NAME}
 ENV NEXT_PUBLIC_APP_TAGLINE=${NEXT_PUBLIC_APP_TAGLINE}
+ENV NEXT_PUBLIC_DESIGN_SYSTEM=${NEXT_PUBLIC_DESIGN_SYSTEM}
 
 RUN corepack enable pnpm && pnpm build
 
 # ---- Stage 3: run (minimal image) -------------------------------------------
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production

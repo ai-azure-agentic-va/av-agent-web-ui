@@ -191,7 +191,7 @@ const VIEWS: { value: SidebarView; label: string }[] = [
   { value: "skills", label: "Skills" },
 ];
 
-// The sidebar's two lists behind one segmented switch in its 60px head: a
+// The sidebar's two lists behind one segmented switch in its 52px head: a
 // tab list, with the arrow keys moving between the two tabs.
 function SidebarPanels({
   idPrefix,
@@ -226,7 +226,7 @@ function SidebarPanels({
     <>
       <div
         className={cn(
-          "border-sidebar-border flex h-15 shrink-0 items-center border-b px-4",
+          "border-sidebar-border flex h-13 shrink-0 items-center border-b px-4",
           headClassName,
         )}
       >

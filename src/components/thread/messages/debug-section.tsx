@@ -147,7 +147,7 @@ export function DebugSection({ debug }: { debug: DebugPayload }) {
                       href={c.source_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-foreground decoration-signal/60 hover:decoration-signal mb-1 block truncate underline underline-offset-4"
+                      className="text-foreground decoration-cite/60 hover:decoration-cite mb-1 block truncate underline underline-offset-4"
                     >
                       {c.source_url}
                     </a>

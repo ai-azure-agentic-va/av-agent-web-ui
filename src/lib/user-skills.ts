@@ -9,9 +9,9 @@ import type { Message } from "@langchain/langgraph-sdk";
  * when they use the skill in chat.
  *
  * Skills live in this browser's localStorage only. The backend has no store
- * for them and no per-request hook, so a skill in use travels inside the
+ * for them and no per-request hook, so each skill in use travels inside the
  * message itself, as one extra text block (see skillContentBlock). The UI
- * hides that block wherever it shows the person's text.
+ * hides those blocks wherever it shows the person's text.
  *
  * Mirrored into React via useSyncExternalStore, and kept in step across tabs
  * through the `storage` event.
@@ -34,6 +34,9 @@ export type UserSkillDraft = Pick<
 export const SKILL_NAME_MAX = 60;
 export const SKILL_DESCRIPTION_MAX = 200;
 export const SKILL_INSTRUCTIONS_MAX = 8000;
+// How many skills one message can carry. Each adds up to
+// SKILL_INSTRUCTIONS_MAX characters to the message, so keep it small.
+export const MAX_SKILLS_PER_MESSAGE = 5;
 
 const STORAGE_KEY = "ivy:skills:v1";
 
@@ -204,7 +207,7 @@ export function restoreSkill(skill: UserSkill): void {
 // ---------------------------------------------------------------------------
 // A skill inside a message
 // ---------------------------------------------------------------------------
-// The skill rides along as its own text block after the person's words. It
+// Each skill rides along as its own text block after the person's words. It
 // opens with a tag the UI recognises, so getContentString can leave it out of
 // the question headline, the history title, copy and edit.
 
@@ -234,17 +237,17 @@ export function skillContentBlock(skill: UserSkill): TextBlock {
 }
 
 /**
- * A typed message's content: the person's words, then the skill they picked,
- * then any attachments.
+ * A typed message's content: the person's words, then the skills they
+ * picked, in the order they picked them, then any attachments.
  */
 export function buildMessageContent(
   text: string,
-  skill: UserSkill | null,
+  skills: readonly UserSkill[] = [],
   attachments: readonly unknown[] = [],
 ): Message["content"] {
   return [
     ...(text ? [{ type: "text", text }] : []),
-    ...(skill ? [skillContentBlock(skill)] : []),
+    ...skills.map(skillContentBlock),
     ...attachments,
   ] as Message["content"];
 }
@@ -259,12 +262,11 @@ export function isSkillBlock(block: unknown): block is TextBlock {
   );
 }
 
-/** The name of the skill a message was sent with, or null. */
-export function getMessageSkillName(
-  content: Message["content"],
-): string | null {
-  if (!Array.isArray(content)) return null;
-  const block = content.find(isSkillBlock);
-  const match = block ? SKILL_BLOCK_RE.exec(block.text) : null;
-  return match ? unescapeAttr(match[1]) : null;
+/** The names of the skills a message was sent with, in order. */
+export function getMessageSkillNames(content: Message["content"]): string[] {
+  if (!Array.isArray(content)) return [];
+  return content.filter(isSkillBlock).flatMap((block) => {
+    const match = SKILL_BLOCK_RE.exec(block.text);
+    return match ? [unescapeAttr(match[1])] : [];
+  });
 }

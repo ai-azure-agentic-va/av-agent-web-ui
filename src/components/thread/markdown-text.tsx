@@ -51,7 +51,7 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
   };
 
   return (
-    <div className="bg-ink-raised flex items-center justify-between gap-4 py-1.5 pr-2 pl-4 text-white">
+    <div className="bg-ink-raised text-background flex h-8 items-center justify-between gap-4 pr-1 pl-4">
       <span className="font-mono text-xs lowercase">{language}</span>
       <TooltipIconButton
         tooltip="Copy"
@@ -111,7 +111,7 @@ const defaultComponents: any = {
   h1: ({ className, ...props }: { className?: string }) => (
     <h1
       className={cn(
-        "mt-8 mb-3 scroll-m-20 text-[22px] leading-[30px] font-semibold tracking-[-0.015em] text-balance first:mt-0 last:mb-0",
+        "mt-6 mb-2 scroll-m-20 text-lg leading-[26px] font-semibold tracking-[-0.01em] text-balance first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -120,7 +120,7 @@ const defaultComponents: any = {
   h2: ({ className, ...props }: { className?: string }) => (
     <h2
       className={cn(
-        "mt-7 mb-2.5 scroll-m-20 text-[19px] leading-7 font-semibold tracking-[-0.01em] text-balance first:mt-0 last:mb-0",
+        "mt-5 mb-1.5 scroll-m-20 text-base leading-6 font-semibold text-balance first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -129,7 +129,7 @@ const defaultComponents: any = {
   h3: ({ className, ...props }: { className?: string }) => (
     <h3
       className={cn(
-        "mt-6 mb-2 scroll-m-20 text-[17px] font-semibold text-balance first:mt-0 last:mb-0",
+        "mt-4 mb-1.5 scroll-m-20 text-[15px] font-semibold text-balance first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -138,7 +138,7 @@ const defaultComponents: any = {
   h4: ({ className, ...props }: { className?: string }) => (
     <h4
       className={cn(
-        "mt-5 mb-2 scroll-m-20 text-[17px] font-medium first:mt-0 last:mb-0",
+        "mt-4 mb-1.5 scroll-m-20 text-[15px] font-medium first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -147,7 +147,7 @@ const defaultComponents: any = {
   h5: ({ className, ...props }: { className?: string }) => (
     <h5
       className={cn(
-        "mt-5 mb-1.5 text-[15px] font-semibold first:mt-0 last:mb-0",
+        "mt-4 mb-1 text-sm font-semibold first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -156,7 +156,7 @@ const defaultComponents: any = {
   h6: ({ className, ...props }: { className?: string }) => (
     <h6
       className={cn(
-        "text-muted-foreground mt-5 mb-1.5 text-[15px] font-semibold first:mt-0 last:mb-0",
+        "text-muted-foreground mt-4 mb-1 text-sm font-semibold first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -164,7 +164,7 @@ const defaultComponents: any = {
   ),
   p: ({ className, ...props }: { className?: string }) => (
     <p
-      className={cn("my-4 max-w-[68ch] first:mt-0 last:mb-0", className)}
+      className={cn("my-3 max-w-[68ch] first:mt-0 last:mb-0", className)}
       {...props}
     />
   ),
@@ -207,7 +207,7 @@ const defaultComponents: any = {
         target="_blank"
         rel="noopener noreferrer"
         className={cn(
-          "text-foreground decoration-signal/60 hover:decoration-signal focus-visible:ring-ring rounded-[2px] font-normal underline decoration-1 underline-offset-4 transition-colors outline-none hover:decoration-2 focus-visible:ring-2",
+          "text-foreground decoration-cite/60 hover:decoration-cite focus-visible:ring-ring rounded-[2px] font-normal underline decoration-1 underline-offset-4 transition-colors outline-none hover:decoration-2 focus-visible:ring-2",
           className,
         )}
         {...props}
@@ -219,7 +219,7 @@ const defaultComponents: any = {
   blockquote: ({ className, ...props }: { className?: string }) => (
     <blockquote
       className={cn(
-        "border-foreground text-muted-foreground my-4 border-l-2 pl-4 first:mt-0 last:mb-0",
+        "border-foreground text-muted-foreground my-3 border-l-2 pl-4 first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -228,7 +228,7 @@ const defaultComponents: any = {
   ul: ({ className, ...props }: { className?: string }) => (
     <ul
       className={cn(
-        "my-4 ml-6 max-w-[66ch] list-disc first:mt-0 last:mb-0 [&>li]:mt-1.5 [&>li]:pl-1",
+        "my-3 ml-5 max-w-[66ch] list-disc first:mt-0 last:mb-0 [&>li]:mt-1 [&>li]:pl-1",
         className,
       )}
       {...props}
@@ -237,7 +237,7 @@ const defaultComponents: any = {
   ol: ({ className, ...props }: { className?: string }) => (
     <ol
       className={cn(
-        "marker:text-muted-foreground my-4 ml-6 max-w-[66ch] list-decimal first:mt-0 last:mb-0 [&>li]:mt-1.5 [&>li]:pl-1",
+        "marker:text-muted-foreground my-3 ml-5 max-w-[66ch] list-decimal first:mt-0 last:mb-0 [&>li]:mt-1 [&>li]:pl-1",
         className,
       )}
       {...props}
@@ -245,16 +245,16 @@ const defaultComponents: any = {
   ),
   hr: ({ className, ...props }: { className?: string }) => (
     <hr
-      className={cn("border-border my-6 border-b", className)}
+      className={cn("border-border my-5 border-b", className)}
       {...props}
     />
   ),
   // Wide tables scroll inside the answer instead of widening the whole thread.
   table: ({ className, ...props }: { className?: string }) => (
-    <div className="my-5 scrollbar-thin overflow-x-auto first:mt-0 last:mb-0">
+    <div className="my-4 scrollbar-thin overflow-x-auto first:mt-0 last:mb-0">
       <table
         className={cn(
-          "w-full border-separate border-spacing-0 text-[15px] leading-6",
+          "w-full border-separate border-spacing-0 text-sm leading-5",
           className,
         )}
         {...props}
@@ -264,7 +264,7 @@ const defaultComponents: any = {
   th: ({ className, ...props }: { className?: string }) => (
     <th
       className={cn(
-        "bg-muted border-y border-l px-3 py-2 text-left text-sm font-medium first:rounded-tl-[2px] last:rounded-tr-[14px] last:border-r [&[align=center]]:text-center [&[align=right]]:text-right",
+        "bg-muted border-y border-l px-3 py-1.5 text-left text-[13px] font-medium first:rounded-tl-[2px] last:rounded-tr-[14px] last:border-r [&[align=center]]:text-center [&[align=right]]:text-right",
         className,
       )}
       {...props}
@@ -273,7 +273,7 @@ const defaultComponents: any = {
   td: ({ className, ...props }: { className?: string }) => (
     <td
       className={cn(
-        "border-b border-l px-3 py-2 text-left align-top tabular-nums last:border-r [&[align=center]]:text-center [&[align=right]]:text-right",
+        "border-b border-l px-3 py-1.5 text-left align-top tabular-nums last:border-r [&[align=center]]:text-center [&[align=right]]:text-right",
         className,
       )}
       {...props}
@@ -298,7 +298,7 @@ const defaultComponents: any = {
   pre: ({ className, ...props }: { className?: string }) => (
     <pre
       className={cn(
-        "corner-step my-4 max-w-4xl overflow-x-auto bg-black text-[13px] leading-6 text-white first:mt-0 last:mb-0",
+        "corner-step bg-foreground text-background my-3 max-w-4xl overflow-x-auto text-[13px] leading-5 first:mt-0 last:mb-0",
         className,
       )}
       {...props}
@@ -348,7 +348,7 @@ const defaultComponents: any = {
 const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
   const blocks = useMemo(() => splitMarkdownBlocks(children), [children]);
   return (
-    <div className="markdown-content text-[17px] leading-[29px] font-light">
+    <div className="markdown-content text-[15px] leading-6 font-light">
       {blocks.map((block, i) => (
         // Index keys are stable here: blocks only append (or the tail grows)
         // while an answer streams, so earlier entries keep their key/content.

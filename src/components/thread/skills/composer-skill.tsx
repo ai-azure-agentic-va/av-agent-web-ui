@@ -8,8 +8,18 @@ import {
 } from "react";
 import { ScrollText, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CardHeader, CardTitle, cardVariants } from "@/components/ui/card";
-import { type UserSkill, skillHandle, useUserSkills } from "@/lib/user-skills";
+import {
+  CardBody,
+  CardHeader,
+  CardTitle,
+  cardVariants,
+} from "@/components/ui/card";
+import {
+  MAX_SKILLS_PER_MESSAGE,
+  type UserSkill,
+  skillHandle,
+  useUserSkills,
+} from "@/lib/user-skills";
 import {
   findMention,
   insertMentionTrigger,
@@ -19,24 +29,31 @@ import {
 
 const optionId = (listId: string, index: number) => `${listId}-option-${index}`;
 
+const LIMIT_NOTE = `You can use up to ${MAX_SKILLS_PER_MESSAGE} skills in one message. Remove one to add another.`;
+
 /**
  * Typing "@" in the composer: follows the caret, lists the skills matching
  * the tag it sits on, and on a pick takes the tag out of the message and
- * hands the skill to the composer as its chip. One skill per message, so a
- * second pick replaces the first.
+ * hands the skill to the composer as a chip. A message can carry several
+ * skills, up to MAX_SKILLS_PER_MESSAGE; the ones already on it (`attached`,
+ * by id) drop out of the list.
  */
 export function useSkillMention({
   value,
   setValue,
   textareaRef,
+  attached = [],
   onPick,
 }: {
   value: string;
   setValue: (value: string) => void;
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
+  attached?: readonly string[];
   onPick: (skill: UserSkill) => void;
 }) {
   const skills = useUserSkills();
+  const full = attached.length >= MAX_SKILLS_PER_MESSAGE;
+  const available = skills.filter((s) => !attached.includes(s.id));
   const listId = useId();
   const [caret, setCaret] = useState<number | null>(null);
   const [focused, setFocused] = useState(false);
@@ -47,9 +64,11 @@ export function useSkillMention({
 
   const mention =
     caret === null ? null : findMention(value, Math.min(caret, value.length));
-  const options = mention ? matchSkills(skills, mention.query) : [];
-  const open =
-    focused && !!mention && mention.start !== dismissedAt && options.length > 0;
+  const options = mention && !full ? matchSkills(available, mention.query) : [];
+  const tagging = focused && !!mention && mention.start !== dismissedAt;
+  const open = tagging && options.length > 0;
+  // A tag typed with the message already full gets a note, not a list.
+  const limitReached = tagging && full;
   const key = mention ? `${mention.start}:${mention.query}` : "";
   const activeIndex =
     active.key === key ? Math.min(active.index, options.length - 1) : 0;
@@ -94,7 +113,13 @@ export function useSkillMention({
 
   /** Handles the list's keys; returns true when the key was used. */
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
-    if (!open || !mention || e.nativeEvent.isComposing) return false;
+    if (!mention || e.nativeEvent.isComposing) return false;
+    if (limitReached && e.key === "Escape") {
+      e.preventDefault();
+      setDismissedAt(mention.start);
+      return true;
+    }
+    if (!open) return false;
     switch (e.key) {
       case "ArrowDown":
         e.preventDefault();
@@ -121,7 +146,13 @@ export function useSkillMention({
 
   return {
     hasSkills: skills.length > 0,
+    // Whether the footer button has anything left to offer, and if not, why.
+    canAdd: !full && available.length > 0,
+    unavailableReason: full
+      ? `Up to ${MAX_SKILLS_PER_MESSAGE} skills per message`
+      : "All your skills are on this message",
     open,
+    limitReached,
     options,
     activeIndex,
     listId,
@@ -148,7 +179,9 @@ export function useSkillMention({
     // Read out by the composer's live region.
     status: open
       ? `${options.length} ${options.length === 1 ? "skill" : "skills"} found. Use the up and down arrows to choose, then Enter.`
-      : "",
+      : limitReached
+        ? LIMIT_NOTE
+        : "",
   };
 }
 
@@ -156,7 +189,8 @@ export type SkillMention = ReturnType<typeof useSkillMention>;
 
 /** The list of matching skills, floating just above the composer. */
 export function SkillPicker({ mention }: { mention: SkillMention }) {
-  const { open, options, activeIndex, listId, setActive, pick } = mention;
+  const { open, limitReached, options, activeIndex, listId, setActive, pick } =
+    mention;
 
   useEffect(() => {
     if (!open) return;
@@ -165,6 +199,23 @@ export function SkillPicker({ mention }: { mention: SkillMention }) {
       ?.scrollIntoView?.({ block: "nearest" });
   }, [open, listId, activeIndex]);
 
+  if (limitReached) {
+    return (
+      <div
+        className={cn(
+          cardVariants({ tone: "float" }),
+          "absolute bottom-full left-0 z-30 mb-2 w-[min(100%,360px)] overflow-hidden",
+        )}
+      >
+        <CardHeader>
+          <CardTitle as="p">Use a skill</CardTitle>
+        </CardHeader>
+        <CardBody className="text-muted-foreground py-3 text-sm">
+          {LIMIT_NOTE}
+        </CardBody>
+      </div>
+    );
+  }
   if (!open) return null;
   return (
     <div
@@ -215,7 +266,7 @@ export function SkillPicker({ mention }: { mention: SkillMention }) {
   );
 }
 
-/** The skill this message will be sent with, on the composer. */
+/** One of the skills this message will be sent with, on the composer. */
 export function SkillChip({
   skill,
   onRemove,
@@ -247,14 +298,22 @@ export function SkillChip({
 }
 
 /** The composer footer's way into the picker, for people who don't type @. */
-export function SkillPickerButton({ onClick }: { onClick: () => void }) {
+export function SkillPickerButton({
+  onClick,
+  disabledReason,
+}: {
+  onClick: () => void;
+  // Set when there's no skill left to add; says why.
+  disabledReason?: string;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={!!disabledReason}
       aria-label="Use a skill"
-      title="Use a skill (type @)"
-      className="text-foreground hover:bg-accent focus-visible:ring-ring flex h-8 w-8 items-center justify-center rounded-md transition-colors outline-none focus-visible:ring-2"
+      title={disabledReason ?? "Use a skill (type @)"}
+      className="text-foreground hover:bg-accent focus-visible:ring-ring flex h-8 w-8 items-center justify-center rounded-md transition-colors outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
     >
       <ScrollText className="h-4 w-4" />
     </button>

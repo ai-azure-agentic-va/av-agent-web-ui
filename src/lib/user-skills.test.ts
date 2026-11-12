@@ -182,7 +182,7 @@ describe("a skill inside a message", () => {
   it("carries the instructions in a tagged block the UI can recognise", async () => {
     const {
       createSkill,
-      getMessageSkillName,
+      getMessageSkillNames,
       isSkillBlock,
       skillContentBlock,
     } = await load();
@@ -198,8 +198,8 @@ describe("a skill inside a message", () => {
       { type: "text", text: "Write up INC0001234" },
       block,
     ] as Message["content"];
-    expect(getMessageSkillName(content)).toBe('Say "hi" & go');
-    expect(getMessageSkillName("plain string content")).toBeNull();
+    expect(getMessageSkillNames(content)).toEqual(['Say "hi" & go']);
+    expect(getMessageSkillNames("plain string content")).toEqual([]);
   });
 
   it("goes after the person's words and before any attachments", async () => {
@@ -213,16 +213,41 @@ describe("a skill inside a message", () => {
       data: "iVBOR",
     };
 
-    expect(buildMessageContent("Write it up", skill, [image])).toEqual([
+    expect(buildMessageContent("Write it up", [skill], [image])).toEqual([
       { type: "text", text: "Write it up" },
       skillContentBlock(skill),
       image,
     ]);
-    expect(buildMessageContent("Write it up", null)).toEqual([
+    expect(buildMessageContent("Write it up", [])).toEqual([
       { type: "text", text: "Write it up" },
     ]);
     // An attachment-only message has no text block.
-    expect(buildMessageContent("", null, [image])).toEqual([image]);
+    expect(buildMessageContent("", [], [image])).toEqual([image]);
+  });
+
+  it("carries several skills, each in its own block, in the order picked", async () => {
+    const {
+      buildMessageContent,
+      createSkill,
+      getMessageSkillNames,
+      skillContentBlock,
+    } = await load();
+    const triage = createSkill({ ...draft, name: "Incident triage" });
+    const update = createSkill({ ...draft, name: "Customer update" });
+
+    const content = buildMessageContent("Write up INC0001234", [
+      update,
+      triage,
+    ]);
+    expect(content).toEqual([
+      { type: "text", text: "Write up INC0001234" },
+      skillContentBlock(update),
+      skillContentBlock(triage),
+    ]);
+    expect(getMessageSkillNames(content)).toEqual([
+      "Customer update",
+      "Incident triage",
+    ]);
   });
 
   it("is left out of the person's text everywhere the UI shows it", async () => {

@@ -1,6 +1,7 @@
 import type { Message, ToolMessage } from "@langchain/langgraph-sdk";
 import type { AnalyzedDocument } from "@/providers/Stream";
 import { isSkillBlock } from "@/lib/user-skills";
+import { isMarkdownAttachmentBlock } from "@/lib/multimodal-utils";
 
 /**
  * Extracts a string summary from a message's content, supporting multimodal (text, image, file, etc.).
@@ -10,12 +11,12 @@ import { isSkillBlock } from "@/lib/user-skills";
  */
 export function getContentString(content: Message["content"]): string {
   if (typeof content === "string") return content;
-  // A skill sent with the message is for the agent, not part of what the
-  // person wrote, so it never shows up as their text.
+  // A skill or Markdown file sent with the message is for the agent, not
+  // part of what the person wrote, so it never shows up as their text.
   const texts = content
     .filter(
       (c): c is { type: "text"; text: string } =>
-        c.type === "text" && !isSkillBlock(c),
+        c.type === "text" && !isSkillBlock(c) && !isMarkdownAttachmentBlock(c),
     )
     .map((c) => c.text);
   return texts.join(" ");

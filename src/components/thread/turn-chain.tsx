@@ -90,8 +90,9 @@ function Segment({
         RAIL,
         "top-0",
         !last && "bottom-0",
-        // 8px into the 12px gap above the answer, stopping 4px short of the U.
-        last && tail === "answer" && "-bottom-2",
+        // 6px into the 12px gap above the answer, stopping 4px short of the
+        // leaf (which sits 2px proud of the answer's first 24px line).
+        last && tail === "answer" && "-bottom-1.5",
         last && tail === "open" && "bottom-0",
         // Stop at the last bead's centre (a step row's is 6px padding + half
         // its 20px line).

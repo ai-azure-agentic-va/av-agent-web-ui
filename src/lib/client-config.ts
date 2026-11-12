@@ -7,7 +7,7 @@ export type ClientConfig = {
   // When true, tool calls / tool results are hidden in the chat. This is the
   // only control; there is no UI toggle or URL param.
   hideToolCalls: boolean;
-  // When true, the composer accepts image / PDF attachments (paperclip button,
+  // When true, the composer accepts Markdown (.md) attachments (paperclip button,
   // paste, drag-and-drop). Opt-in: off unless explicitly enabled.
   enableFileUpload: boolean;
 };

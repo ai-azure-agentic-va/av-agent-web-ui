@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
   // needed for the membership check above; nothing reads session.groups later.
   // A user in many groups (forced full Graph resolution when configured by
   // name) would otherwise push the signed cookie past the browser's ~4KB limit,
-  // which silently drops it → middleware sees no session → redirect loop.
+  // which silently drops it → proxy (src/proxy.ts) sees no session → redirect loop.
   const sessionPayload = {
     oid: user.oid,
     name: user.name,

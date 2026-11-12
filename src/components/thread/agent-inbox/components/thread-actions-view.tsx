@@ -399,7 +399,8 @@ export function ThreadActionsView({
                     // is a black outline, rejected takes the red tint.
                     status === "approve" && "border-foreground bg-foreground",
                     status === "edit" && "border-foreground bg-background",
-                    status === "reject" && "border-signal-ink bg-signal-tint",
+                    status === "reject" &&
+                      "border-destructive-ink bg-destructive-tint",
                     index === currentIndex &&
                       "outline-foreground outline-2 outline-offset-2",
                   )}

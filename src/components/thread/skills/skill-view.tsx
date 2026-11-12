@@ -24,9 +24,9 @@ import { MarkdownText } from "../markdown-text";
 import { NEW_SKILL, useOpenSkill } from "./state";
 
 // A skill reads like an answer: the name as the page's headline, the
-// instructions as answer copy in the same 780px column.
+// instructions as answer copy in the same 880px column.
 const HEADLINE =
-  "text-foreground text-[32px] leading-[1.15] font-semibold tracking-[-0.025em] text-balance break-words sm:text-[40px]";
+  "text-foreground text-[28px] leading-[1.15] font-semibold tracking-[-0.025em] text-balance break-words sm:text-[32px]";
 const KICKER = "text-muted-foreground text-[13px] font-medium";
 
 function formatDate(iso: string) {
@@ -79,7 +79,7 @@ export function SkillView({ onUse }: { onUse: (id: string) => void }) {
   return (
     <div className="relative flex-1 overflow-hidden">
       <div className="absolute inset-0 scrollbar-thin overflow-y-auto px-4">
-        <div className="mx-auto w-full max-w-[780px] pt-10 pb-24">{body}</div>
+        <div className="mx-auto w-full max-w-[880px] pt-6 pb-16">{body}</div>
       </div>
     </div>
   );
@@ -143,7 +143,7 @@ function SkillSheet({
         <p className="text-muted-foreground mt-1.5 text-[13px]">@{handle}</p>
       )}
       {skill.description && (
-        <p className="mt-4 max-w-[62ch] text-[17px] leading-[29px] font-light">
+        <p className="mt-3 max-w-[62ch] text-[15px] leading-6 font-light">
           {skill.description}
         </p>
       )}
@@ -332,7 +332,7 @@ function SkillEditor({
       <h1 className={cn(HEADLINE, "mt-2")}>
         {skill ? "Edit skill" : "New skill"}
       </h1>
-      <p className="text-muted-foreground mt-3 max-w-[62ch] text-[15px] leading-6">
+      <p className="text-muted-foreground mt-3 max-w-[62ch] text-sm leading-[22px]">
         Brief {APP_NAME} the way you would brief a colleague: what to look at,
         what to include and how to lay out the answer.
       </p>
@@ -431,7 +431,7 @@ function SkillMissing({ onClose }: { onClose: () => void }) {
   return (
     <div className="flex flex-col items-start gap-3">
       <h1 className={HEADLINE}>This skill isn&apos;t here</h1>
-      <p className="text-muted-foreground max-w-[62ch] text-[15px] leading-6">
+      <p className="text-muted-foreground max-w-[62ch] text-sm leading-[22px]">
         It may have been deleted. Skills stay in the browser they were written
         in, so one saved on another computer won&apos;t show up here.
       </p>

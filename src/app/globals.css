@@ -1,66 +1,16 @@
 @import "tailwindcss";
+/* Design tokens. One file per design system, picked at build time by
+   NEXT_PUBLIC_DESIGN_SYSTEM (src/lib/design-system.ts): ps is :root; another
+   system would override it under :root[data-design-system="<name>"]. Shared
+   values (radius) stay below. */
+@import "../styles/tokens/ps.css";
 
 @plugin "tailwindcss-animate";
 
 @custom-variant dark (&:is(.dark *));
 
-/* IVY. Black and white carry the layout;
-   red is the signal: live state, citations and focus. The neutrals are
-   pure grey so they never tint the
-   accent colours. The app is light-only (forcedTheme in layout.tsx). */
 :root {
-  --background: #ffffff;
-  --foreground: #000000;
-  --card: #ffffff;
-  --card-foreground: #000000;
-  --popover: #ffffff;
-  --popover-foreground: #000000;
-  --primary: #000000;
-  --primary-foreground: #ffffff;
-  --secondary: #f3f3f3;
-  --secondary-foreground: #000000;
-  --muted: #f3f3f3;
-  /* 7.4:1 on white, 6.6:1 on --muted. */
-  --muted-foreground: #555555;
-  --accent: #f3f3f3;
-  --accent-foreground: #000000;
-  /* Signal red. 4.65:1 on white: fine for text at body size and up. */
-  --signal: #e90130;
-  --signal-foreground: #ffffff;
-  /* Red for text on the red tint, where #e90130 would drop below 4.5:1. */
-  --signal-ink: #b00024;
-  --signal-tint: #fdebef;
-  /* The one lifted near-black, for a segment raised off a black surface: the
-     "Sources" label on the credit strap and the code block's language bar. */
-  --ink-raised: #262626;
-  --destructive: #e90130;
-  --destructive-foreground: #ffffff;
-  /* No green in the palette: confirmations are black. */
-  --success: #000000;
-  --success-foreground: #ffffff;
-  /* Hairlines for layout; --input is the 3:1 boundary for form controls. */
-  --border: #e3e3e3;
-  --input: #8a8a8a;
-  /* The chain's rail from question to answer: a step darker than a hairline
-     so it reads as a line, still decorative (no contrast duty). */
-  --rail: #c8c8c8;
-  --ring: #e90130;
   --radius: 0.625rem;
-
-  --sidebar: #ffffff;
-  --sidebar-foreground: #000000;
-  --sidebar-primary: #000000;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f3f3f3;
-  --sidebar-accent-foreground: #000000;
-  --sidebar-border: #e3e3e3;
-  --sidebar-ring: #e90130;
-
-  --chart-1: #000000;
-  --chart-2: #e90130;
-  --chart-3: #555555;
-  --chart-4: #8a8a8a;
-  --chart-5: #b00024;
 }
 
 @theme inline {
@@ -85,11 +35,16 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-signal: var(--signal);
   --color-signal-foreground: var(--signal-foreground);
-  --color-signal-ink: var(--signal-ink);
-  --color-signal-tint: var(--signal-tint);
+  --color-signal-strong: var(--signal-strong);
+  --color-signal-text: var(--signal-text);
+  --color-cite: var(--cite);
+  --color-cite-foreground: var(--cite-foreground);
+  --color-cite-on-ink: var(--cite-on-ink);
   --color-ink-raised: var(--ink-raised);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-ink: var(--destructive-ink);
+  --color-destructive-tint: var(--destructive-tint);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
   --color-border: var(--border);
@@ -131,7 +86,7 @@
     background-color: color-mix(in srgb, var(--signal) 18%, transparent);
   }
 
-  /* Text that sits on black or red needs its own selection tint. */
+  /* Text that sits on the ink or the signal needs its own selection tint. */
   .bg-primary ::selection,
   .bg-signal ::selection {
     background-color: color-mix(in srgb, #ffffff 35%, transparent);
@@ -174,7 +129,8 @@
    so the thumb's softness comes from a translucent color instead. */
 .scrollbar-thin {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, #000 22%, transparent) transparent;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent)
+    transparent;
 }
 
 .scrollbar-thin::-webkit-scrollbar {
@@ -187,12 +143,12 @@
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background-color: color-mix(in srgb, #000 22%, transparent);
+  background-color: color-mix(in srgb, var(--foreground) 22%, transparent);
   border-radius: 2px;
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background-color: color-mix(in srgb, #000 40%, transparent);
+  background-color: color-mix(in srgb, var(--foreground) 40%, transparent);
 }
 
 /* Messages arrive once, from already-legible: a short rise, no fade from zero. */
@@ -211,8 +167,8 @@
   animation: message-in 0.32s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Live state: the chain's running bead, the U while it writes the answer and
-   the sign-in line. The only things on screen that pulse. */
+/* Live state: the chain's running bead, the agent mark while it writes the
+   answer and the sign-in line. The only things on screen that pulse. */
 @keyframes live-dot {
   0%,
   100% {
@@ -273,8 +229,8 @@
 }
 
 /* Inline citation marker, e.g. the "[1]" in an answer that links to a source.
-   The same red numeral opens the answer's Sources credit, so the code and the
-   credit read as one. */
+   The same --cite numeral opens the answer's Sources credit, so the code and
+   the credit read as one. */
 .citation {
   display: inline-flex;
   align-items: center;
@@ -289,7 +245,7 @@
   line-height: 1.45;
   vertical-align: 0.3em;
   text-decoration: none;
-  color: var(--signal);
+  color: var(--cite);
   transition:
     background-color 150ms ease-out,
     color 150ms ease-out;
@@ -297,8 +253,8 @@
 
 .citation:hover,
 .citation:focus-visible {
-  color: var(--signal-foreground);
-  background-color: var(--signal);
+  color: var(--cite-foreground);
+  background-color: var(--cite);
 }
 
 @media (prefers-reduced-motion: reduce) {

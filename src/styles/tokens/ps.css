@@ -1,0 +1,82 @@
+/* Design system: ps. The default, and the fallback for any build without
+   NEXT_PUBLIC_DESIGN_SYSTEM (src/lib/design-system.ts).
+
+   Black and white carry the layout; red is the one signal: live state,
+   citations, focus and send. The neutrals stay pure grey so they never tint
+   the accent colours. Light-only (forcedTheme in layout.tsx).
+
+   Every system defines the SAME set of tokens (design-system.test.ts checks
+   it), so components read roles and never a system name. */
+:root {
+  --background: #ffffff;
+  --foreground: #000000;
+  --card: #ffffff;
+  --card-foreground: #000000;
+  --popover: #ffffff;
+  --popover-foreground: #000000;
+  --primary: #000000;
+  --primary-foreground: #ffffff;
+  --secondary: #f3f3f3;
+  --secondary-foreground: #000000;
+  --muted: #f3f3f3;
+  /* 7.4:1 on white, 6.6:1 on --muted. */
+  --muted-foreground: #555555;
+  --accent: #f3f3f3;
+  --accent-foreground: #000000;
+
+  /* Signal: what is live, what sends, what has focus. Signal red, 4.65:1 on
+     white, so the fill, the text and the hover can share one red. */
+  --signal: #e90130;
+  --signal-foreground: #ffffff;
+  /* Hover on a signal fill (the send button). */
+  --signal-strong: #b00024;
+  /* The signal as text or an icon on paper. */
+  --signal-text: #e90130;
+
+  /* Cite: what is sourced. Citation numerals and outlines, cited source
+     numerals, link underlines. The source shares the signal's red. */
+  --cite: #e90130;
+  --cite-foreground: #ffffff;
+  /* Source numerals on the black credit strap (4.5:1). */
+  --cite-on-ink: #e90130;
+
+  /* The one lifted near-black, for a segment raised off a black surface: the
+     "Sources" label on the credit strap and the code block's language bar. */
+  --ink-raised: #262626;
+
+  /* Errors and destructive actions. One red, so these match it. */
+  --destructive: #e90130;
+  --destructive-foreground: #ffffff;
+  /* Error text on the tint, failed tool results, destructive hover. */
+  --destructive-ink: #b00024;
+  /* The error toast ground and rejected-interrupt fill. Never decorative. */
+  --destructive-tint: #fdebef;
+
+  /* No green in the palette: confirmations are black. */
+  --success: #000000;
+  --success-foreground: #ffffff;
+  /* Hairlines for layout; --input is the 3:1 boundary for form controls. */
+  --border: #e3e3e3;
+  --input: #8a8a8a;
+  /* The chain's rail from question to answer: a step darker than a hairline
+     so it reads as a line, still decorative (no contrast duty). */
+  --rail: #c8c8c8;
+  --ring: #e90130;
+  /* Diff deletions and !important in code, over the --foreground code block. */
+  --code-deleted: #cd6660;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #000000;
+  --sidebar-primary: #000000;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f3f3f3;
+  --sidebar-accent-foreground: #000000;
+  --sidebar-border: #e3e3e3;
+  --sidebar-ring: #e90130;
+
+  --chart-1: #000000;
+  --chart-2: #e90130;
+  --chart-3: #555555;
+  --chart-4: #8a8a8a;
+  --chart-5: #b00024;
+}
