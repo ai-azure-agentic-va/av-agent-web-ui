@@ -1,9 +1,10 @@
 @import "tailwindcss";
 /* Design tokens. One file per design system, picked at build time by
-   NEXT_PUBLIC_DESIGN_SYSTEM (src/lib/design-system.ts): ps is :root; another
-   system would override it under :root[data-design-system="<name>"]. Shared
+   NEXT_PUBLIC_DESIGN_SYSTEM (src/lib/design-system.ts): ps is :root, ETS
+   overrides it under :root[data-design-system="ets"]. Shared, non-brand
    values (radius) stay below. */
 @import "../styles/tokens/ps.css";
+@import "../styles/tokens/ets.css";
 
 @plugin "tailwindcss-animate";
 

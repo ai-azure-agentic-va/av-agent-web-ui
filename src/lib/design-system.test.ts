@@ -16,12 +16,13 @@ describe("resolveDesignSystem", () => {
 
   it("accepts each system, ignoring case and surrounding space", () => {
     expect(resolveDesignSystem("ps")).toBe("ps");
-    expect(resolveDesignSystem(" PS ")).toBe("ps");
+    expect(resolveDesignSystem("ets")).toBe("ets");
+    expect(resolveDesignSystem(" ETS ")).toBe("ets");
   });
 
   it("fails loudly on an unknown name instead of shipping the wrong brand", () => {
-    expect(() => resolveDesignSystem("pss")).toThrow(
-      'NEXT_PUBLIC_DESIGN_SYSTEM="pss" is not a design system. Use one of: ps.',
+    expect(() => resolveDesignSystem("etss")).toThrow(
+      'NEXT_PUBLIC_DESIGN_SYSTEM="etss" is not a design system. Use one of: ps, ets.',
     );
   });
 });
@@ -35,8 +36,8 @@ describe("BRAND_ASSETS", () => {
   });
 });
 
-// Another system would override ps's :root block, so a token missing from its
-// file would silently fall back to ps red in that build. Keep the sets identical.
+// ETS overrides ps's :root block, so a token missing from one file would
+// silently fall back to ps red in an ETS build. Keep the sets identical.
 describe("design-system token files", () => {
   const tokens = (system: string) =>
     new Set(

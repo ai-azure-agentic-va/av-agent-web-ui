@@ -22,6 +22,6 @@ export async function proxy(req: NextRequest) {
 // sign-in and access-denied pages show the mark and favicon.
 export const config = {
   matcher: [
-    "/((?!api/auth|auth|chat/auth/callback|_next/static|_next/image|favicon\\.ico|logo\\.png|icon\\.png).*)",
+    "/((?!api/auth|auth|chat/auth/callback|_next/static|_next/image|favicon\\.ico|logo\\.png|icon\\.png|ets/).*)",
   ],
 };

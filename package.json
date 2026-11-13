@@ -1,11 +1,13 @@
 {
   "name": "open-web-ui",
   "private": true,
-  "version": "3.7.0",
+  "version": "3.8.0",
   "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "dev:ets": "NEXT_PUBLIC_DESIGN_SYSTEM=ets next dev",
+    "build:ets": "NEXT_PUBLIC_DESIGN_SYSTEM=ets next build",
     "start": "next start",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

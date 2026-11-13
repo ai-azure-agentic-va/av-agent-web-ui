@@ -1,8 +1,8 @@
 import { cn } from "@/lib/utils";
 import { BRAND } from "@/lib/design-system";
 
-// The build's mark, the IVY leaf (src/lib/design-system.ts). Square and
-// transparent, so every placement sizes it the same way.
+// The build's mark: the IVY leaf (ps) or the ETS boomerangs (ETS). Square
+// and transparent in both, so every placement sizes it the same way.
 interface AppLogoProps {
   className?: string;
   width?: number;

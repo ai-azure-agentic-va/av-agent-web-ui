@@ -34,8 +34,8 @@ ARG NEXT_PUBLIC_API_URL=/api
 ARG NEXT_PUBLIC_ASSISTANT_ID=chat
 ARG NEXT_PUBLIC_APP_NAME="IVY"
 ARG NEXT_PUBLIC_APP_TAGLINE="An incident virtual assistant which answers from tickets, pipelines and docs."
-# Design system (colour tokens + mark): ps, the default. Baked in at build;
-# an unknown value fails the build.
+# Design system (colour tokens + mark): ps (default) or ets. Baked in at build;
+# an unknown value fails the build. e.g. --build-arg NEXT_PUBLIC_DESIGN_SYSTEM=ets
 ARG NEXT_PUBLIC_DESIGN_SYSTEM=ps
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_PUBLIC_ASSISTANT_ID=${NEXT_PUBLIC_ASSISTANT_ID}

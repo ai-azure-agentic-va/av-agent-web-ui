@@ -1,0 +1,93 @@
+/* Design system: ETS.
+   Active when the build sets NEXT_PUBLIC_DESIGN_SYSTEM=ets; the root layout
+   stamps data-design-system="ets" on <html>. The two-part selector outranks
+   the ps :root block whatever the import order.
+
+   Crafted from the ETS logo's three boomerangs (sampled from the source art:
+   orange #EA7E00, sky #4296D2, deep blue #003066), each given one job:
+
+     ink    holds the page: type, the credit strap, buttons, the initials disc
+     orange means NOW: the live step, the send action, focus, the caret
+     blue   means SOURCED: citation numerals, source numerals, link underlines
+
+   The logo's orange (2.8:1) and sky (3.2:1) fail as text on white, so each
+   role carries a fill value and a deeper value for text. Errors get their own
+   red so they can never read as the brand's orange. Neutrals lean a few
+   degrees toward the ink, at the same weight as ps's greys.
+
+   Keep the token set identical to ps.css (design-system.test.ts checks it). */
+:root[data-design-system="ets"] {
+  --background: #ffffff;
+  /* ETS Ink, the logo's third boomerang. 13.0:1 on white. */
+  --foreground: #003066;
+  --card: #ffffff;
+  --card-foreground: #003066;
+  --popover: #ffffff;
+  --popover-foreground: #003066;
+  --primary: #003066;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f4f8;
+  --secondary-foreground: #003066;
+  /* Mist, faintly blue. */
+  --muted: #f1f4f8;
+  /* Slate. 7.7:1 on white, 7.0:1 on --muted. */
+  --muted-foreground: #44546a;
+  --accent: #f1f4f8;
+  --accent-foreground: #003066;
+
+  /* ETS Orange: a hair deeper than the logo's #EA7E00 so the live bead and
+     the send button clear 3:1 against white (3.1:1). */
+  --signal: #e27400;
+  /* Ink on orange (4.2:1), the logo's own pairing: the send arrow. */
+  --signal-foreground: #003066;
+  /* Send hover. The ink arrow keeps 3.4:1 on it. */
+  --signal-strong: #cc6600;
+  /* Ember: orange as text or an icon on paper. 5.0:1. */
+  --signal-text: #b35400;
+
+  /* ETS Blue: the logo's sky taken deep enough to set citation numerals and
+     carry white when a citation fills on hover. 5.5:1 both ways. */
+  --cite: #1f6daa;
+  --cite-foreground: #ffffff;
+  /* Sky, lifted: source numerals on the ink credit strap. 5.6:1. */
+  --cite-on-ink: #6db1e2;
+
+  /* Ink raised off ink: the "Sources" segment and code language bar.
+     White on it 9.5:1. */
+  --ink-raised: #0e4584;
+
+  /* A true red, distinct from the orange: errors only. 5.9:1. */
+  --destructive: #c8102e;
+  --destructive-foreground: #ffffff;
+  /* 7.2:1 on the tint. */
+  --destructive-ink: #9f1026;
+  --destructive-tint: #fdecee;
+
+  /* No green: confirmations are ink. */
+  --success: #003066;
+  --success-foreground: #ffffff;
+  /* Hairline 1.29:1 and rail 1.64:1, matching ps's greys in weight. */
+  --border: #dde3eb;
+  /* 3.4:1 on white, 3.1:1 on --muted. */
+  --input: #7f8da0;
+  --rail: #c1cbd7;
+  /* Focus takes the deeper orange: 3.8:1 on white, 3.5:1 on --muted. */
+  --ring: #cc6600;
+  /* coldark's #cd6660 drops to 3.5:1 on the ink code block. 5.4:1. */
+  --code-deleted: #f28b82;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #003066;
+  --sidebar-primary: #003066;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f1f4f8;
+  --sidebar-accent-foreground: #003066;
+  --sidebar-border: #dde3eb;
+  --sidebar-ring: #cc6600;
+
+  --chart-1: #003066;
+  --chart-2: #e27400;
+  --chart-3: #4296d2;
+  --chart-4: #7f8da0;
+  --chart-5: #b35400;
+}

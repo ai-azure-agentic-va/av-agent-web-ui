@@ -3,13 +3,15 @@
 // bundles, like APP_NAME), so one image carries one look:
 //
 //   ps  — black ink, a red signal, the IVY leaf (the default)
+//   ets — dark-blue ink, orange for what is live, blue for what is sourced,
+//         the ETS three-boomerang mark
 //
 // The tokens live in src/styles/tokens/<name>.css; the root layout stamps
 // data-design-system on <html> and the matching token block takes over.
-// Every component reads tokens, never a system name, so another system is a
+// Every component reads tokens, never a system name, so a third system is a
 // new token file plus an entry below.
 
-export const DESIGN_SYSTEMS = ["ps"] as const;
+export const DESIGN_SYSTEMS = ["ps", "ets"] as const;
 export type DesignSystem = (typeof DESIGN_SYSTEMS)[number];
 
 /**
@@ -43,6 +45,7 @@ type BrandAssets = {
 
 export const BRAND_ASSETS: Record<DesignSystem, BrandAssets> = {
   ps: { mark: "/logo.png", icon: "/icon.png" },
+  ets: { mark: "/ets/mark.png", icon: "/ets/icon.png" },
 };
 
 export const BRAND: BrandAssets = BRAND_ASSETS[DESIGN_SYSTEM];

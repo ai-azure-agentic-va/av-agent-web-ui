@@ -27,9 +27,9 @@ export function HumanMark({ className }: { className?: string }) {
 }
 
 /**
- * The agent's mark, the IVY leaf (src/lib/design-system.ts). It pulses while
- * the agent is writing the answer, the one live element on screen at that
- * moment.
+ * The agent's mark: the IVY leaf in ps builds, the ETS boomerangs in ETS
+ * builds (src/lib/design-system.ts). It pulses while the agent is writing the
+ * answer, the one live element on screen at that moment.
  */
 export function AgentMark({
   responding = false,
